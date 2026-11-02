@@ -21,7 +21,11 @@ def get_engine() -> Engine:
             "or the process environment."
         )
 
-    return create_engine(database_url, pool_pre_ping=True)
+    return create_engine(
+        database_url,
+        pool_pre_ping=True,
+        connect_args={"connect_timeout": 10},
+    )
 
 
 def run_schema(engine: Engine | None = None) -> None:
