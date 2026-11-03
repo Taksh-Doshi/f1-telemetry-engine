@@ -1,0 +1,59 @@
+Query file: sql\queries\10_degradation_slope_per_stint.sql
+Baseline execution time: 46.555 ms
+
+SQL:
+-- Question: What is the estimated lap-time degradation slope per tyre-life lap for each stint?
+SELECT
+    year,
+    round,
+    event_name,
+    driver_code,
+    stint_number,
+    compound,
+    count(*) AS clean_laps,
+    round(regr_slope(lap_time_seconds, tyre_life)::numeric, 4)
+        AS seconds_per_tyre_life_lap
+FROM clean_laps
+WHERE session_type = 'R'
+  AND tyre_life IS NOT NULL
+  AND stint_number IS NOT NULL
+GROUP BY year, round, event_name, driver_code, stint_number, compound
+HAVING count(*) >= 5
+ORDER BY year, round, driver_code, stint_number
+LIMIT 10;
+
+EXPLAIN (ANALYZE, BUFFERS):
+Limit  (cost=401.07..401.12 rows=1 width=100) (actual time=46.310..46.345 rows=10 loops=1)
+  Buffers: shared hit=87529
+  ->  GroupAggregate  (cost=401.07..401.12 rows=1 width=100) (actual time=46.309..46.343 rows=10 loops=1)
+        Group Key: e.season_year, e.round_number, d.abbreviation, l.stint_number, e.event_name, l.compound
+        Filter: (count(*) >= 5)
+        Buffers: shared hit=87529
+        ->  Sort  (cost=401.07..401.07 rows=1 width=70) (actual time=46.288..46.295 rows=165 loops=1)
+              Sort Key: e.season_year, e.round_number, d.abbreviation, l.stint_number, e.event_name, l.compound
+              Sort Method: quicksort  Memory: 2322kB
+              Buffers: shared hit=87529
+              ->  Nested Loop  (cost=0.58..401.06 rows=1 width=70) (actual time=0.039..33.526 rows=21727 loops=1)
+                    Buffers: shared hit=87529
+                    ->  Nested Loop  (cost=0.43..392.86 rows=1 width=62) (actual time=0.029..22.276 rows=21727 loops=1)
+                          Buffers: shared hit=44075
+                          ->  Nested Loop  (cost=0.29..385.99 rows=1 width=34) (actual time=0.023..10.895 rows=21727 loops=1)
+                                Buffers: shared hit=621
+                                ->  Seq Scan on sessions s  (cost=0.00..18.00 rows=3 width=16) (actual time=0.006..0.020 rows=24 loops=1)
+                                      Filter: ((session_type)::text = 'R'::text)
+                                      Buffers: shared hit=1
+                                ->  Index Scan using idx_laps_session_id on laps l  (cost=0.29..122.65 rows=1 width=34) (actual time=0.016..0.393 rows=905 loops=24)
+                                      Index Cond: (session_id = s.session_id)
+                                      Filter: ((pit_in_time_seconds IS NULL) AND (pit_out_time_seconds IS NULL) AND (lap_time_seconds IS NOT NULL) AND (deleted IS NOT TRUE) AND (is_accurate IS TRUE) AND (tyre_life IS NOT NULL) AND (stint_number IS NOT NULL) AND (COALESCE(track_status, ''::text) !~ '[4567]'::text) AND ((compound IS NULL) OR (compound <> ALL ('{INTERMEDIATE,WET}'::text[]))) AND (lap_number > 1))
+                                      Rows Removed by Filter: 203
+                                      Buffers: shared hit=620
+                          ->  Index Scan using pk_events on events e  (cost=0.15..6.83 rows=1 width=44) (actual time=0.000..0.000 rows=1 loops=21727)
+                                Index Cond: (event_id = s.event_id)
+                                Buffers: shared hit=43454
+                    ->  Index Scan using pk_drivers on drivers d  (cost=0.15..8.17 rows=1 width=24) (actual time=0.000..0.000 rows=1 loops=21727)
+                          Index Cond: (driver_id = l.driver_id)
+                          Buffers: shared hit=43454
+Planning:
+  Buffers: shared hit=10
+Planning Time: 0.361 ms
+Execution Time: 46.555 ms

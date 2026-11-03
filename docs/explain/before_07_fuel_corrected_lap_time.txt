@@ -1,0 +1,68 @@
+Query file: sql\queries\07_fuel_corrected_lap_time.sql
+Baseline execution time: 48.851 ms
+
+SQL:
+-- Question: What are lap times adjusted to the starting-fuel reference using an estimated fuel penalty?
+-- Estimate only: 0.03 seconds per lap is an illustrative fuel-burn penalty, not a measured constant.
+WITH parameters AS (
+    SELECT 0.03::double precision AS estimated_seconds_lost_per_lap
+),
+corrected_laps AS (
+    SELECT
+        clean.year,
+        clean.round,
+        clean.event_name,
+        clean.driver_code,
+        clean.lap_number,
+        clean.lap_time_seconds,
+        clean.lap_time_seconds
+            + (clean.lap_number - 1) * parameters.estimated_seconds_lost_per_lap
+            AS estimated_start_fuel_lap_seconds,
+        parameters.estimated_seconds_lost_per_lap
+    FROM clean_laps AS clean
+    CROSS JOIN parameters
+    WHERE clean.session_type = 'R'
+)
+SELECT
+    year,
+    round,
+    event_name,
+    driver_code,
+    lap_number,
+    estimated_seconds_lost_per_lap,
+    round(lap_time_seconds::numeric, 3) AS observed_lap_seconds,
+    round(estimated_start_fuel_lap_seconds::numeric, 3)
+        AS estimated_start_fuel_lap_seconds
+FROM corrected_laps
+ORDER BY year, round, driver_code, lap_number
+LIMIT 10;
+
+EXPLAIN (ANALYZE, BUFFERS):
+Limit  (cost=401.09..401.09 rows=1 width=126) (actual time=48.747..48.749 rows=10 loops=1)
+  Buffers: shared hit=87529
+  ->  Sort  (cost=401.09..401.09 rows=1 width=126) (actual time=48.746..48.747 rows=10 loops=1)
+        Sort Key: e.season_year, e.round_number, d.abbreviation, l.lap_number
+        Sort Method: top-N heapsort  Memory: 26kB
+        Buffers: shared hit=87529
+        ->  Nested Loop  (cost=0.58..401.08 rows=1 width=126) (actual time=0.051..45.535 rows=21727 loops=1)
+              Buffers: shared hit=87529
+              ->  Nested Loop  (cost=0.43..392.86 rows=1 width=54) (actual time=0.035..22.313 rows=21727 loops=1)
+                    Buffers: shared hit=44075
+                    ->  Nested Loop  (cost=0.29..385.99 rows=1 width=26) (actual time=0.026..11.022 rows=21727 loops=1)
+                          Buffers: shared hit=621
+                          ->  Seq Scan on sessions s  (cost=0.00..18.00 rows=3 width=16) (actual time=0.007..0.021 rows=24 loops=1)
+                                Filter: ((session_type)::text = 'R'::text)
+                                Buffers: shared hit=1
+                          ->  Index Scan using idx_laps_session_id on laps l  (cost=0.29..122.65 rows=1 width=26) (actual time=0.017..0.397 rows=905 loops=24)
+                                Index Cond: (session_id = s.session_id)
+                                Filter: ((pit_in_time_seconds IS NULL) AND (pit_out_time_seconds IS NULL) AND (lap_time_seconds IS NOT NULL) AND (deleted IS NOT TRUE) AND (is_accurate IS TRUE) AND (COALESCE(track_status, ''::text) !~ '[4567]'::text) AND ((compound IS NULL) OR (compound <> ALL ('{INTERMEDIATE,WET}'::text[]))) AND (lap_number > 1))
+                                Rows Removed by Filter: 203
+                                Buffers: shared hit=620
+                    ->  Index Scan using pk_events on events e  (cost=0.15..6.83 rows=1 width=44) (actual time=0.000..0.000 rows=1 loops=21727)
+                          Index Cond: (event_id = s.event_id)
+                          Buffers: shared hit=43454
+              ->  Index Scan using pk_drivers on drivers d  (cost=0.15..8.17 rows=1 width=24) (actual time=0.000..0.000 rows=1 loops=21727)
+                    Index Cond: (driver_id = l.driver_id)
+                    Buffers: shared hit=43454
+Planning Time: 0.326 ms
+Execution Time: 48.851 ms

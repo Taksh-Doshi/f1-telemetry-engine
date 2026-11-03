@@ -81,6 +81,14 @@ fills in any missing data. Confirm the run before starting a full season:
 python -m f1engine.ingest --season 2024
 ```
 
+Run one of the ten numbered SQL analysis queries and print its result:
+
+```powershell
+python -m f1engine.queries 1
+```
+
+The matching query files are in `sql/queries/`.
+
 ## Architecture
 
 ## Roadmap

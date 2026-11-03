@@ -1,0 +1,65 @@
+Query file: sql\queries\10_degradation_slope_per_stint.sql
+Execution time after index: 33.666 ms
+
+SQL:
+-- Question: What is the estimated lap-time degradation slope per tyre-life lap for each stint?
+SELECT
+    year,
+    round,
+    event_name,
+    driver_code,
+    stint_number,
+    compound,
+    count(*) AS clean_laps,
+    round(regr_slope(lap_time_seconds, tyre_life)::numeric, 4)
+        AS seconds_per_tyre_life_lap
+FROM clean_laps
+WHERE session_type = 'R'
+  AND tyre_life IS NOT NULL
+  AND stint_number IS NOT NULL
+GROUP BY year, round, event_name, driver_code, stint_number, compound
+HAVING count(*) >= 5
+ORDER BY year, round, driver_code, stint_number
+LIMIT 10;
+
+EXPLAIN (ANALYZE, BUFFERS):
+Limit  (cost=12.67..12.76 rows=1 width=76) (actual time=33.058..33.094 rows=10 loops=1)
+  Buffers: shared hit=43772
+  ->  GroupAggregate  (cost=12.67..12.76 rows=1 width=76) (actual time=33.056..33.092 rows=10 loops=1)
+        Group Key: e.season_year, e.round_number, d.abbreviation, l.stint_number, e.event_name, l.compound
+        Filter: (count(*) >= 5)
+        Buffers: shared hit=43772
+        ->  Sort  (cost=12.67..12.68 rows=2 width=46) (actual time=33.032..33.042 rows=165 loops=1)
+              Sort Key: e.season_year, e.round_number, d.abbreviation, l.stint_number, e.event_name, l.compound
+              Sort Method: quicksort  Memory: 2322kB
+              Buffers: shared hit=43772
+              ->  Nested Loop  (cost=10.01..12.66 rows=2 width=46) (actual time=9.005..20.694 rows=21727 loops=1)
+                    Buffers: shared hit=43772
+                    ->  Hash Join  (cost=9.87..11.31 rows=2 width=30) (actual time=8.984..10.735 rows=21727 loops=1)
+                          Hash Cond: (s.session_id = l.session_id)
+                          Buffers: shared hit=318
+                          ->  Seq Scan on sessions s  (cost=0.00..1.30 rows=24 width=16) (actual time=0.006..0.028 rows=24 loops=1)
+                                Filter: ((session_type)::text = 'R'::text)
+                                Buffers: shared hit=1
+                          ->  Hash  (cost=9.85..9.85 rows=2 width=30) (actual time=8.967..8.969 rows=21727 loops=1)
+                                Buckets: 32768 (originally 1024)  Batches: 1 (originally 1)  Memory Usage: 1760kB
+                                Buffers: shared hit=317
+                                ->  Hash Join  (cost=8.47..9.85 rows=2 width=30) (actual time=4.973..6.368 rows=21727 loops=1)
+                                      Hash Cond: (d.driver_id = l.driver_id)
+                                      Buffers: shared hit=317
+                                      ->  Seq Scan on drivers d  (cost=0.00..1.24 rows=24 width=12) (actual time=0.005..0.009 rows=24 loops=1)
+                                            Buffers: shared hit=1
+                                      ->  Hash  (cost=8.44..8.44 rows=2 width=34) (actual time=4.958..4.959 rows=21727 loops=1)
+                                            Buckets: 32768 (originally 1024)  Batches: 1 (originally 1)  Memory Usage: 1845kB
+                                            Buffers: shared hit=316
+                                            ->  Index Only Scan using idx_laps_clean_analysis on laps l  (cost=0.41..8.44 rows=2 width=34) (actual time=0.055..2.292 rows=21727 loops=1)
+                                                  Filter: ((tyre_life IS NOT NULL) AND (stint_number IS NOT NULL))
+                                                  Heap Fetches: 2464
+                                                  Buffers: shared hit=316
+                    ->  Index Scan using pk_events on events e  (cost=0.14..0.66 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=21727)
+                          Index Cond: (event_id = s.event_id)
+                          Buffers: shared hit=43454
+Planning:
+  Buffers: shared hit=32
+Planning Time: 0.685 ms
+Execution Time: 33.666 ms

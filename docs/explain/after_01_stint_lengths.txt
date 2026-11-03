@@ -1,0 +1,66 @@
+Query file: sql\queries\01_stint_lengths.sql
+Execution time after index: 33.219 ms
+
+SQL:
+-- Question: How many clean laps did each driver  in each tyre stint?
+SELECT
+    year,
+    round,
+    event_name,
+    driver_code,
+    stint_number,
+    compound,
+    count(*) AS clean_lap_count,
+    min(lap_number) AS first_clean_lap,
+    max(lap_number) AS last_clean_lap
+FROM clean_laps
+WHERE session_type = 'R'
+GROUP BY
+    year,
+    round,
+    event_name,
+    driver_code,
+    stint_number,
+    compound
+ORDER BY year, round, driver_code, stint_number
+LIMIT 10;
+
+EXPLAIN (ANALYZE, BUFFERS):
+Limit  (cost=12.67..12.74 rows=2 width=48) (actual time=32.553..32.581 rows=10 loops=1)
+  Buffers: shared hit=43772
+  ->  GroupAggregate  (cost=12.67..12.74 rows=2 width=48) (actual time=32.551..32.579 rows=10 loops=1)
+        Group Key: e.season_year, e.round_number, d.abbreviation, l.stint_number, e.event_name, l.compound
+        Buffers: shared hit=43772
+        ->  Sort  (cost=12.67..12.68 rows=2 width=38) (actual time=32.539..32.547 rows=165 loops=1)
+              Sort Key: e.season_year, e.round_number, d.abbreviation, l.stint_number, e.event_name, l.compound
+              Sort Method: quicksort  Memory: 2001kB
+              Buffers: shared hit=43772
+              ->  Nested Loop  (cost=10.01..12.66 rows=2 width=38) (actual time=8.617..20.360 rows=21727 loops=1)
+                    Buffers: shared hit=43772
+                    ->  Hash Join  (cost=9.87..11.31 rows=2 width=22) (actual time=8.597..10.255 rows=21727 loops=1)
+                          Hash Cond: (s.session_id = l.session_id)
+                          Buffers: shared hit=318
+                          ->  Seq Scan on sessions s  (cost=0.00..1.30 rows=24 width=16) (actual time=0.006..0.020 rows=24 loops=1)
+                                Filter: ((session_type)::text = 'R'::text)
+                                Buffers: shared hit=1
+                          ->  Hash  (cost=9.85..9.85 rows=2 width=22) (actual time=8.583..8.585 rows=21727 loops=1)
+                                Buckets: 32768 (originally 1024)  Batches: 1 (originally 1)  Memory Usage: 1530kB
+                                Buffers: shared hit=317
+                                ->  Hash Join  (cost=8.47..9.85 rows=2 width=22) (actual time=4.627..6.141 rows=21727 loops=1)
+                                      Hash Cond: (d.driver_id = l.driver_id)
+                                      Buffers: shared hit=317
+                                      ->  Seq Scan on drivers d  (cost=0.00..1.24 rows=24 width=12) (actual time=0.005..0.008 rows=24 loops=1)
+                                            Buffers: shared hit=1
+                                      ->  Hash  (cost=8.44..8.44 rows=2 width=26) (actual time=4.611..4.612 rows=21727 loops=1)
+                                            Buckets: 32768 (originally 1024)  Batches: 1 (originally 1)  Memory Usage: 1614kB
+                                            Buffers: shared hit=316
+                                            ->  Index Only Scan using idx_laps_clean_analysis on laps l  (cost=0.41..8.44 rows=2 width=26) (actual time=0.014..2.100 rows=21727 loops=1)
+                                                  Heap Fetches: 2464
+                                                  Buffers: shared hit=316
+                    ->  Index Scan using pk_events on events e  (cost=0.14..0.66 rows=1 width=32) (actual time=0.000..0.000 rows=1 loops=21727)
+                          Index Cond: (event_id = s.event_id)
+                          Buffers: shared hit=43454
+Planning:
+  Buffers: shared hit=32
+Planning Time: 0.610 ms
+Execution Time: 33.219 ms
