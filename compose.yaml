@@ -30,6 +30,19 @@ services:
       timeout: 5s
       retries: 5
 
+  betterdb:
+    image: betterdb/monitor:0.54.0-no-ai
+    restart: unless-stopped
+    environment:
+      DB_HOST: valkey
+      DB_PORT: 6379
+      STORAGE_TYPE: memory
+    ports:
+      - "127.0.0.1:3001:3001"
+    depends_on:
+      valkey:
+        condition: service_healthy
+
 volumes:
   postgres_data:
   valkey_data:

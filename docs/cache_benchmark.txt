@@ -1,0 +1,13 @@
+Valkey degradation-query latency benchmark
+Query selection: 2024, Bahrain Grand Prix, SOFT
+Cache key: f1:deg:2024:Bahrain Grand Prix:SOFT
+Uncached database runs: 50
+Uncached database median: 3.517 ms
+Uncached database p95: 5.225 ms
+Cache miss run: 11.019 ms
+Cached hit runs: 50
+Cached hit median: 1.117 ms
+Cached hit p95: 2.168 ms
+Median speed-up (uncached / cached hit): 3.15x
+Rows returned: 10
+Note: results are local to this machine and this dataset; the table contains 26,604 laps.

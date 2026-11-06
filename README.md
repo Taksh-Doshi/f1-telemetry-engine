@@ -89,6 +89,47 @@ python -m f1engine.queries 1
 
 The matching query files are in `sql/queries/`.
 
+Replay clean laps into a per-race Valkey leaderboard. Each driver's score is
+their best lap time, and the command prints the top five every ten laps:
+
+```powershell
+python -m f1engine.leaderboard 2024 1
+```
+
+## Caching and monitoring
+
+The local stack runs BetterDB Monitor at [http://localhost:3001](http://localhost:3001).
+It connects to Valkey over the Compose network (`DB_HOST=valkey`,
+`DB_PORT=6379`) and uses in-memory storage for monitor history. The dashboard
+port is bound to `127.0.0.1`, so it is only exposed on this computer.
+
+Generate activity for the dashboard:
+
+1. Run `python -m f1engine.bench_cache` to create cache misses and hits.
+2. Run `python -m f1engine.leaderboard 2024 1` to exercise sorted-set updates.
+3. In BetterDB, inspect the instance overview for memory, the cache/semantic
+   cache analytics for hit-rate information when available, and Slow Log or
+   command analytics for slow commands. The generic cache benchmark reports
+   application hit/miss counts in the terminal; BetterDB's cache hit-rate
+   analytics may depend on the enabled feature set and workload type.
+   With the in-memory storage backend, BetterDB currently logs that key
+   analytics metrics are unsupported, so those particular metrics may be
+   unavailable in this setup.
+
+Screenshots to add after exploring the dashboard:
+
+![BetterDB overview screenshot placeholder](docs/betterdb-overview.png)
+
+![BetterDB slow commands screenshot placeholder](docs/betterdb-slow-commands.png)
+
+## Results and limitations
+
+The relative-pace redesign isolates shared race evolution, but it does not yet
+predict tyre wear better than a no-degradation baseline. Many race-level fits
+are rank deficient, and most eligible slopes are negative, so treat the
+estimates as exploratory rather than strategy guidance. See the [full results
+and limitations](docs/results_after.md) and the [preserved before snapshot](docs/results_before.md).
+
 ## Architecture
 
 ## Roadmap
