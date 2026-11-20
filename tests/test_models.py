@@ -15,17 +15,19 @@ from f1engine.models import (
 from f1engine.tyre_model_v2 import (
     fit_race_fixed_effects_slopes,
     prepare_relative_target,
-    save_artifact,
 )
 from f1engine.tyre_model_v3 import (
     DEFAULT_FUEL_EFFECT_S_PER_KG,
     apply_fuel_correction,
-    build_artifact as build_v3_artifact,
     build_fixed_effects_design,
     fit_race_fixed_effects,
     make_synthetic_races,
     prepare_laps,
     synthetic_recovery_experiment,
+)
+from f1engine.tyre_model_v4 import (
+    build_artifact as build_v4_artifact,
+    fuel_mismatch_experiment,
 )
 
 
@@ -357,15 +359,33 @@ def test_primary_stint_method_recovers_synthetic_compound_slopes() -> None:
     assert (primary["error"].abs() <= 0.03).all()
 
 
-def _save_test_artifact(tmp_path, slopes: pd.DataFrame | None = None):
+def _save_test_artifact(
+    tmp_path,
+    slopes: pd.DataFrame | None = None,
+    *,
+    low_data_circuit: bool = False,
+):
     """Write a small complete artifact for isolated API tests."""
     import joblib
 
     model_path = tmp_path / "relative_model.joblib"
     test_slopes = _synthetic_race_slopes() if slopes is None else slopes
+    status = (
+        test_slopes[["race_id", "year", "round", "circuit"]]
+        .drop_duplicates()
+        .assign(
+            clean_laps=600,
+            status="full_rank",
+            quality_status="eligible",
+            low_data_reason=None,
+        )
+    )
+    if low_data_circuit:
+        status.loc[status.index[0], "quality_status"] = "low_data"
     joblib.dump(
-        build_v3_artifact(
+        build_v4_artifact(
             test_slopes,
+            status,
             max_tyre_age_by_compound={"SOFT": 30, "MEDIUM": 30, "HARD": 30},
         ),
         model_path,
@@ -384,13 +404,24 @@ def test_prediction_returns_finite_estimate_interval_and_reliability(
         11,
         model_path=model_path,
     )
-    point, lower, upper, reliable = result
 
-    assert len(result) == 4
-    assert all(pd.notna(value) for value in (point, lower, upper, reliable))
-    assert lower <= point <= upper
-    assert point == pytest.approx(0.8)
-    assert reliable is True
+    assert set(result) == {
+        "expected_loss_per_lap",
+        "lower_95",
+        "upper_95",
+        "reliable",
+        "scope",
+        "warning",
+    }
+    assert all(
+        pd.notna(result[key])
+        for key in ("expected_loss_per_lap", "lower_95", "upper_95", "reliable")
+    )
+    assert result["lower_95"] <= result["expected_loss_per_lap"] <= result["upper_95"]
+    assert result["expected_loss_per_lap"] == pytest.approx(0.08)
+    assert result["reliable"] is True
+    assert result["scope"] == "circuit"
+    assert result["warning"] is None
 
 
 def test_prediction_warns_and_uses_pooled_estimate_for_sparse_circuit(
@@ -398,17 +429,51 @@ def test_prediction_warns_and_uses_pooled_estimate_for_sparse_circuit(
 ) -> None:
     model_path = _save_test_artifact(tmp_path)
 
-    with pytest.warns(RuntimeWarning, match="using the cross-circuit pool"):
-        point, lower, upper, reliable = predict_degradation(
-            "Circuit B",
-            "MEDIUM",
-            10,
-            model_path=model_path,
-        )
+    result = predict_degradation(
+        "Circuit B",
+        "MEDIUM",
+        10,
+        model_path=model_path,
+    )
 
-    assert all(pd.notna(value) for value in (point, lower, upper))
-    assert lower <= point <= upper
-    assert reliable is False
+    assert result["lower_95"] <= result["expected_loss_per_lap"] <= result["upper_95"]
+    assert result["reliable"] is False
+    assert result["scope"] == "cross-circuit"
+    assert "cross-circuit pool" in result["warning"]
+
+
+def test_prediction_marks_low_data_circuit_unreliable(tmp_path) -> None:
+    model_path = _save_test_artifact(tmp_path, low_data_circuit=True)
+
+    result = predict_degradation(
+        "Circuit A",
+        "SOFT",
+        10,
+        model_path=model_path,
+    )
+
+    assert result["scope"] == "cross-circuit"
+    assert result["reliable"] is False
+    assert "low_data" in result["warning"]
+
+
+def test_prediction_marks_interval_containing_zero_unreliable(tmp_path) -> None:
+    slopes = _synthetic_race_slopes()
+    soft = slopes["compound"].eq("SOFT")
+    slopes.loc[soft, "slope_seconds_per_lap"] = 0.001
+    slopes.loc[soft, "standard_error"] = 0.01
+    model_path = _save_test_artifact(tmp_path, slopes)
+
+    result = predict_degradation(
+        "Circuit A",
+        "SOFT",
+        10,
+        model_path=model_path,
+    )
+
+    assert result["lower_95"] < 0 < result["upper_95"]
+    assert result["reliable"] is False
+    assert "includes zero" in result["warning"]
 
 
 def test_negative_raw_pool_is_not_silently_clamped(
@@ -418,17 +483,17 @@ def test_negative_raw_pool_is_not_silently_clamped(
     slopes.loc[slopes["compound"].eq("SOFT"), "slope_seconds_per_lap"] = -0.02
     model_path = _save_test_artifact(tmp_path, slopes)
 
-    point, lower, upper, reliable = predict_degradation(
+    result = predict_degradation(
         "Circuit A",
         "SOFT",
         30,
         model_path=model_path,
     )
 
-    assert point < 0
-    assert lower <= point <= upper
-    assert lower < 0
-    assert reliable is True
+    assert result["expected_loss_per_lap"] < 0
+    assert result["lower_95"] <= result["expected_loss_per_lap"] <= result["upper_95"]
+    assert result["lower_95"] < 0
+    assert result["reliable"] is True
 
 
 def test_cliff_is_a_bounded_planning_threshold(tmp_path) -> None:
@@ -466,3 +531,38 @@ def test_prediction_requires_saved_artifact(tmp_path) -> None:
             3,
             model_path=tmp_path / "missing.joblib",
         )
+
+
+@pytest.fixture(scope="module")
+def fuel_mismatch_results() -> pd.DataFrame:
+    return fuel_mismatch_experiment(
+        scenarios=((0.04, 0.02),),
+        race_count=9,
+        driver_count=18,
+        race_laps=60,
+    )
+
+
+def test_stint_slope_is_biased_by_a_wrong_fuel_assumption(
+    fuel_mismatch_results: pd.DataFrame,
+) -> None:
+    rows = fuel_mismatch_results.loc[
+        fuel_mismatch_results["method"].eq("Stint slopes")
+    ]
+    expected_bias = (0.02 - 0.04) * 110 / 60
+
+    assert len(rows) == 3
+    assert rows["fuel_mismatch_bias"].to_numpy() == pytest.approx(
+        [expected_bias] * 3, abs=1e-8
+    )
+
+
+def test_race_fixed_effects_are_invariant_to_assumed_fuel_rate(
+    fuel_mismatch_results: pd.DataFrame,
+) -> None:
+    rows = fuel_mismatch_results.loc[
+        fuel_mismatch_results["method"].eq("Race fixed effects")
+    ]
+
+    assert rows["max_slope_change_across_assumptions"].max() < 1e-8
+    assert (rows["bias"].abs() < 0.01).all()

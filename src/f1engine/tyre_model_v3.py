@@ -1049,7 +1049,6 @@ def run_analysis() -> dict[str, Any]:
     """Run fuel sensitivity, both estimators, recovery, validation and reports."""
     raw_laps = load_laps()
     laps, exclusions = prepare_laps(raw_laps)
-    exclusion_audit = dict(exclusions)
     all_stint_slopes: dict[float, pd.DataFrame] = {}
     stint_audits: dict[float, dict[str, int]] = {}
     pooled_tables: list[pd.DataFrame] = []
@@ -1077,7 +1076,6 @@ def run_analysis() -> dict[str, Any]:
         laps, default_slopes
     )
 
-    default_pool = pooled_tables[FUEL_EFFECT_SETTINGS.index(DEFAULT_FUEL_EFFECT_S_PER_KG)].copy()
     ordering_rows: list[dict[str, Any]] = []
     for setting, pool in zip(FUEL_EFFECT_SETTINGS, pooled_tables):
         ordering = _compound_ordering(pool)
@@ -1200,19 +1198,10 @@ def _make_report(
 ) -> str:
     """Write all requested caveats and observable counts into one report."""
     eligible_slow = int(summary["rows_excluded"])
-    recent_before = (
-        2.283070,
-        9.335910,
-        9.334432,
-        2.989151,
-    )
     zero_race = float(race_eval.iloc[0]["baseline_relative_mae_seconds"])
     model_race = float(race_eval.iloc[0]["model_relative_mae_seconds"])
     zero_season = float(season_eval.iloc[0]["baseline_relative_mae_seconds"])
     model_season = float(season_eval.iloc[0]["model_relative_mae_seconds"])
-    slopes_default = sensitivity_table.loc[
-        sensitivity_table["fuel_effect_s_per_kg"].eq(DEFAULT_FUEL_EFFECT_S_PER_KG)
-    ]
     comparison = pd.DataFrame(
         [
             {

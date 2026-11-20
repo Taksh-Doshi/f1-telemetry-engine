@@ -1,320 +1,166 @@
-# Tyre degradation v3: fuel-corrected stint slopes
+# Tyre degradation v4: race fixed-effects headline
 
-## What changed
+## Headline method and eligibility
 
-The v2 design is invalid. It used driver-stint fixed effects and race-lap fixed
-effects together. Within a stint, tyre age changes by exactly the same amount
-as race lap, so those fixed effects absorb all independent age variation. V2's
-66/66 rank-deficient slope estimates are numerical artifacts, not findings.
-The full v2 report is preserved in [results_v2_flawed.md](results_v2_flawed.md).
+V4 uses the corrected race fixed-effects estimator as its headline. Each race
+fit controls for driver, race lap, and compound intercepts, then estimates a
+separate tyre-age slope by compound. Only full-column-rank designs contribute
+to the reported race estimates. Independent race-level slopes are pooled with
+DerSimonian-Laird random effects and normal 95% intervals.
 
-V3's primary method fits an ordinary least-squares line to fuel-corrected lap
-time versus tyre age within each stint of at least 8 clean laps.
-It pools stint slopes by stint lap count and uses a cluster bootstrap that
-resamples entire races for 95% intervals. This avoids treating stints in a
-shared race as independent bootstrap samples. No 3%-slow-lap filtering was
-applied; all eligible clean laps were retained.
+The minimum data rule is 500 clean race laps in the existing
+`clean_laps` view and at least 3 full-rank races for a
+circuit/compound pool. Below-threshold races remain in the status and
+per-race tables but are excluded from circuit pools and headline validation.
+Circuit/compound groups without three qualifying races use the cross-circuit
+pool and are marked as such in the prediction API. Clean-lap totals can be
+reduced by the view's pit, safety/red flag, wet compound, inaccurate/deleted,
+and lap-one filters.
 
-## Fuel assumption and correction sign
+## Data accounting
 
-For each race, fuel per lap is estimated as 110 kg divided by the maximum lap
-number. The assumed lap-time effect is 0.03
-seconds per kg, with 0.02, 0.03, 0.04
-seconds per kg as the sensitivity band. These are approximate assumptions,
-not measured fuel burn or car-specific coefficients.
+- Source rows: 60,706; complete model rows: 60,227.
+- Excluded rows with missing/invalid required values: 479.
+- Race sessions with clean data: 66; eligible full-rank races: 59; rank-deficient: 6; failed fits: 0.
 
-The correction is
-`corrected_time = observed_time + fuel_per_lap_kg * fuel_effect_s_per_kg * (lap - 1)`.
-The sign is positive: a later lap is faster because it carries less fuel, so
-we add that estimated time penalty to express it at the starting fuel load.
-For example, with 60 race laps and 0.03 s/kg, the per-lap fuel change is
-1.833 kg and each lap after lap 1 receives +0.055 s. Subtracting that positive
-amount would move the lap in the wrong direction.
+### Low-data races
 
-## Data accounting and diagnostics
+| race_id | circuit | clean_laps | low_data_reason |
+| --- | --- | --- | --- |
+| 2022-17 | Singapore Grand Prix | 277 | 277 clean laps; minimum is 500. Raw lap filters removed/omitted 588 wet-compound, 219 safety/red-flag, 45 pit-affected and 20 opening laps (categories may overlap). |
+| 2024-9 | Canadian Grand Prix | 318 | 318 clean laps; minimum is 500. Raw lap filters removed/omitted 846 wet-compound, 186 safety/red-flag, 89 pit-affected and 20 opening laps (categories may overlap). |
+| 2022-18 | Japanese Grand Prix | 0 | 0 clean laps; minimum is 500. Raw lap filters removed/omitted 507 wet-compound, 38 safety/red-flag, 83 pit-affected and 20 opening laps (categories may overlap). |
+| 2024-21 | São Paulo Grand Prix | 0 | 0 clean laps; minimum is 500. Raw lap filters removed/omitted 1134 wet-compound, 149 safety/red-flag, 68 pit-affected and 18 opening laps (categories may overlap). |
 
-- Source rows: 60,706; used rows: 60,227;
-  excluded for missing/invalid required fields: 479.
-- Missing values by field: {'year': 0, 'round': 0, 'circuit': 0, 'driver_code': 0, 'compound': 330, 'tyre_life': 418, 'stint_number': 0, 'lap_number': 0, 'lap_time_seconds': 0}.
-- Invalid numeric values by field: {'year': 0, 'round': 0, 'tyre_life': 0, 'stint_number': 0, 'lap_number': 0, 'lap_time_seconds': 0}.
-- Unknown compound labels retained for the nominal analyses:
-  0.
-- Stints shorter than 8 clean laps: 373;
-  multi-compound stints: 0;
-  stints with no tyre-age variation: 0.
-- Laps removed by optional >3%-slower-than-median filter: **0** (filter disabled).
-- Correlation of tyre age with within-stint lap number:
-  **r=0.9773**. This high value is
-  expected because tyre age usually advances once per lap until a pit stop
-  resets it. It is not itself a bug; the important distinction is that V3
-  estimates a slope within each stint rather than trying to estimate that
-  slope alongside a separate fixed effect for every stint.
+### Rank-deficient race designs
 
-## Proof of the v2 identification problem
+| race_id | circuit | clean_laps | design_rank | design_columns |
+| --- | --- | --- | --- | --- |
+| 2024-9 | Canadian Grand Prix | 318 | 46.0000 | 47.0000 |
+| 2022-19 | United States Grand Prix | 778 | 69.0000 | 70.0000 |
+| 2022-7 | Monaco Grand Prix | 540 | 75.0000 | 76.0000 |
+| 2024-16 | Italian Grand Prix | 927 | 75.0000 | 76.0000 |
+| 2023-9 | Austrian Grand Prix | 1186 | 89.0000 | 90.0000 |
+| 2023-4 | Azerbaijan Grand Prix | 846 | 70.0000 | 71.0000 |
 
-Actual race used for the diagnostic: 2022-1 (893 laps).
-The v2 design rank is 130 for
-133 columns; its condition number is
-3.133e+16. Regressing tyre age on just the
-driver-stint and race-lap fixed-effect columns leaves a maximum absolute
-residual of 6.11e-13 laps.
-Thus, age is an exact (to floating-point precision) linear combination of the
-effects; its interaction with compound cannot be separately identified.
+## Headline race fixed-effects degradation
 
-The corrected design uses one driver effect per driver, not per stint, with
-race-lap effects, compound intercepts, and tyre-age-by-compound terms. For
-2022-1 its rank is 75 of
-75, condition number
-407.3, and full-rank status is
-**True**. Across observed races,
-60 were full rank,
-6 were rank deficient, and
-0 failed. Rank-deficient races are not
-reported as having slopes.
+Slopes are seconds per tyre-age lap; negative estimates are retained, not
+clamped. Circuit pools include only eligible full-rank races and require at
+least 3 distinct race estimates.
 
-## Primary stint slope estimates
+### Cross-circuit pools
 
-Weights are stint lap counts. Intervals below are percentile 95% intervals
-from 1,000 whole-race bootstrap resamples per compound.
-The following table reports the required fuel sensitivity; negative slopes
-remain visible.
+| compound | pooled_slope_seconds_per_lap | lower_95 | upper_95 | race_estimates | negative_race_slope_share | tau_squared | laps |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| HARD | 0.0507 | 0.0438 | 0.0576 | 58 | 0.0690 | 0.0006 | 26995 |
+| MEDIUM | 0.0627 | 0.0539 | 0.0714 | 58 | 0.0345 | 0.0010 | 20784 |
+| SOFT | 0.0902 | 0.0744 | 0.1060 | 51 | 0.1176 | 0.0021 | 7576 |
 
-| fuel_effect_s_per_kg | compound | pooled_slope_seconds_per_lap | lower_95 | upper_95 | median_slope_seconds_per_lap | negative_stint_slope_share | stints | races | pooled_SOFT_gt_MEDIUM_gt_HARD |
+### Circuit/compound pools
+
+| circuit | compound | pooled_slope_seconds_per_lap | lower_95 | upper_95 | race_estimates | negative_race_slope_share | tau_squared | laps |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Abu Dhabi Grand Prix | HARD | 0.0571 | 0.0524 | 0.0619 | 3 | 0.0000 | 0.0000 | 2026 |
+| Abu Dhabi Grand Prix | MEDIUM | 0.0808 | 0.0481 | 0.1135 | 3 | 0.0000 | 0.0008 | 923 |
+| Australian Grand Prix | HARD | 0.0091 | -0.0339 | 0.0520 | 3 | 0.3333 | 0.0013 | 1957 |
+| Australian Grand Prix | MEDIUM | 0.0801 | 0.0628 | 0.0975 | 3 | 0.0000 | 0.0000 | 461 |
+| Bahrain Grand Prix | HARD | 0.1148 | 0.0970 | 0.1326 | 3 | 0.0000 | 0.0002 | 1335 |
+| Bahrain Grand Prix | SOFT | 0.1408 | 0.1149 | 0.1668 | 3 | 0.0000 | 0.0005 | 1194 |
+| Belgian Grand Prix | HARD | 0.1119 | 0.0460 | 0.1779 | 3 | 0.0000 | 0.0025 | 619 |
+| Belgian Grand Prix | MEDIUM | 0.1195 | 0.0524 | 0.1866 | 3 | 0.0000 | 0.0034 | 1025 |
+| Belgian Grand Prix | SOFT | 0.1093 | 0.0297 | 0.1889 | 3 | 0.0000 | 0.0048 | 473 |
+| British Grand Prix | HARD | -0.0402 | -0.1468 | 0.0665 | 3 | 0.3333 | 0.0082 | 306 |
+| British Grand Prix | MEDIUM | -0.0467 | -0.1755 | 0.0822 | 3 | 0.6667 | 0.0127 | 1258 |
+| British Grand Prix | SOFT | 0.0462 | -0.0508 | 0.1433 | 3 | 0.3333 | 0.0064 | 576 |
+| Dutch Grand Prix | HARD | 0.0236 | 0.0039 | 0.0434 | 3 | 0.3333 | 0.0003 | 1079 |
+| Dutch Grand Prix | MEDIUM | 0.0549 | 0.0398 | 0.0699 | 3 | 0.0000 | 0.0001 | 1075 |
+| Dutch Grand Prix | SOFT | 0.0565 | 0.0325 | 0.0805 | 3 | 0.0000 | 0.0004 | 1144 |
+| Hungarian Grand Prix | HARD | 0.0544 | 0.0311 | 0.0778 | 3 | 0.0000 | 0.0004 | 1795 |
+| Hungarian Grand Prix | MEDIUM | 0.0604 | 0.0512 | 0.0697 | 3 | 0.0000 | 0.0000 | 1472 |
+| Hungarian Grand Prix | SOFT | 0.1073 | 0.0874 | 0.1273 | 3 | 0.0000 | 0.0000 | 348 |
+| Mexico City Grand Prix | HARD | 0.0301 | 0.0195 | 0.0407 | 3 | 0.0000 | 0.0001 | 1352 |
+| Mexico City Grand Prix | MEDIUM | 0.0406 | 0.0161 | 0.0651 | 3 | 0.0000 | 0.0004 | 1713 |
+| Mexico City Grand Prix | SOFT | 0.3481 | -0.2794 | 0.9756 | 3 | 0.0000 | 0.2765 | 414 |
+| Miami Grand Prix | HARD | 0.0153 | 0.0015 | 0.0290 | 3 | 0.0000 | 0.0001 | 1719 |
+| Miami Grand Prix | MEDIUM | 0.0235 | 0.0118 | 0.0352 | 3 | 0.0000 | 0.0001 | 1096 |
+| Miami Grand Prix | SOFT | 0.0064 | -0.0590 | 0.0717 | 3 | 0.6667 | 0.0017 | 75 |
+| Saudi Arabian Grand Prix | HARD | 0.0284 | 0.0128 | 0.0441 | 3 | 0.0000 | 0.0001 | 1477 |
+| Saudi Arabian Grand Prix | MEDIUM | 0.0362 | 0.0211 | 0.0513 | 3 | 0.0000 | 0.0001 | 737 |
+| Spanish Grand Prix | HARD | 0.0965 | 0.0426 | 0.1504 | 3 | 0.0000 | 0.0022 | 889 |
+| Spanish Grand Prix | MEDIUM | 0.0768 | 0.0417 | 0.1119 | 3 | 0.0000 | 0.0009 | 1238 |
+| Spanish Grand Prix | SOFT | 0.0865 | 0.0376 | 0.1354 | 3 | 0.0000 | 0.0018 | 1390 |
+
+## Fuel mismatch and fuel-assumption sensitivity
+
+Race-lap fixed effects absorb the shared lap-by-lap fuel trend. Synthetic
+experiments compare a known true fuel effect with a mismatched correction.
+Within-stint slopes move with the difference in fuel assumptions; the race
+fixed-effects slopes should remain invariant across assumed fuel settings.
+
+| true_fuel_effect_s_per_kg | assumed_fuel_effect_s_per_kg | method | compound | true_slope | estimated_slope | bias | correct_assumption_slope | fuel_mismatch_bias | max_slope_change_across_assumptions |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 0.0200 | HARD | 0.0217 | 0.0078 | 0.0334 | 0.0356 | 0.2596 | 1175 | 64 | True |
-| 0.0200 | MEDIUM | 0.0221 | -0.0033 | 0.0445 | 0.0434 | 0.2956 | 1167 | 65 | True |
-| 0.0200 | SOFT | 0.0229 | -0.0548 | 0.0905 | 0.0690 | 0.1898 | 469 | 39 | True |
-| 0.0300 | HARD | 0.0405 | 0.0274 | 0.0524 | 0.0530 | 0.1779 | 1175 | 64 | False |
-| 0.0300 | MEDIUM | 0.0404 | 0.0137 | 0.0655 | 0.0608 | 0.2339 | 1167 | 65 | False |
-| 0.0300 | SOFT | 0.0409 | -0.0361 | 0.1097 | 0.0860 | 0.1301 | 469 | 39 | False |
-| 0.0400 | HARD | 0.0592 | 0.0463 | 0.0708 | 0.0715 | 0.1013 | 1175 | 64 | False |
-| 0.0400 | MEDIUM | 0.0588 | 0.0322 | 0.0810 | 0.0791 | 0.1740 | 1167 | 65 | False |
-| 0.0400 | SOFT | 0.0590 | -0.0164 | 0.1244 | 0.1035 | 0.0959 | 469 | 39 | False |
+| 0.0400 | 0.0200 | Stint slopes | SOFT | 0.1000 | 0.0632 | -0.0368 | 0.0999 | -0.0367 | — |
+| 0.0400 | 0.0200 | Stint slopes | MEDIUM | 0.0600 | 0.0245 | -0.0355 | 0.0612 | -0.0367 | — |
+| 0.0400 | 0.0200 | Stint slopes | HARD | 0.0300 | -0.0066 | -0.0366 | 0.0301 | -0.0367 | — |
+| 0.0400 | 0.0200 | Race fixed effects | SOFT | 0.1000 | 0.0987 | -0.0013 | — | — | 0.0000 |
+| 0.0400 | 0.0300 | Race fixed effects | SOFT | 0.1000 | 0.0987 | -0.0013 | — | — | 0.0000 |
+| 0.0400 | 0.0400 | Race fixed effects | SOFT | 0.1000 | 0.0987 | -0.0013 | — | — | 0.0000 |
+| 0.0400 | 0.0200 | Race fixed effects | MEDIUM | 0.0600 | 0.0603 | 0.0003 | — | — | 0.0000 |
+| 0.0400 | 0.0300 | Race fixed effects | MEDIUM | 0.0600 | 0.0603 | 0.0003 | — | — | 0.0000 |
+| 0.0400 | 0.0400 | Race fixed effects | MEDIUM | 0.0600 | 0.0603 | 0.0003 | — | — | 0.0000 |
+| 0.0400 | 0.0200 | Race fixed effects | HARD | 0.0300 | 0.0297 | -0.0003 | — | — | 0.0000 |
+| 0.0400 | 0.0300 | Race fixed effects | HARD | 0.0300 | 0.0297 | -0.0003 | — | — | 0.0000 |
+| 0.0400 | 0.0400 | Race fixed effects | HARD | 0.0300 | 0.0297 | -0.0003 | — | — | 0.0000 |
+| 0.0400 | 0.0300 | Stint slopes | SOFT | 0.1000 | 0.0807 | -0.0193 | 0.0990 | -0.0183 | — |
+| 0.0400 | 0.0300 | Stint slopes | MEDIUM | 0.0600 | 0.0410 | -0.0190 | 0.0594 | -0.0183 | — |
+| 0.0400 | 0.0300 | Stint slopes | HARD | 0.0300 | 0.0113 | -0.0187 | 0.0296 | -0.0183 | — |
+| 0.0400 | 0.0200 | Race fixed effects | SOFT | 0.1000 | 0.0996 | -0.0004 | — | — | 0.0000 |
+| 0.0400 | 0.0300 | Race fixed effects | SOFT | 0.1000 | 0.0996 | -0.0004 | — | — | 0.0000 |
+| 0.0400 | 0.0400 | Race fixed effects | SOFT | 0.1000 | 0.0996 | -0.0004 | — | — | 0.0000 |
+| 0.0400 | 0.0200 | Race fixed effects | MEDIUM | 0.0600 | 0.0598 | -0.0002 | — | — | 0.0000 |
+| 0.0400 | 0.0300 | Race fixed effects | MEDIUM | 0.0600 | 0.0598 | -0.0002 | — | — | 0.0000 |
+| 0.0400 | 0.0400 | Race fixed effects | MEDIUM | 0.0600 | 0.0598 | -0.0002 | — | — | 0.0000 |
+| 0.0400 | 0.0200 | Race fixed effects | HARD | 0.0300 | 0.0304 | 0.0004 | — | — | 0.0000 |
+| 0.0400 | 0.0300 | Race fixed effects | HARD | 0.0300 | 0.0304 | 0.0004 | — | — | 0.0000 |
+| 0.0400 | 0.0400 | Race fixed effects | HARD | 0.0300 | 0.0304 | 0.0004 | — | — | 0.0000 |
+| 0.0200 | 0.0400 | Stint slopes | SOFT | 0.1000 | 0.1373 | 0.0373 | 0.1006 | 0.0367 | — |
+| 0.0200 | 0.0400 | Stint slopes | MEDIUM | 0.0600 | 0.0967 | 0.0367 | 0.0600 | 0.0367 | — |
+| 0.0200 | 0.0400 | Stint slopes | HARD | 0.0300 | 0.0664 | 0.0364 | 0.0298 | 0.0367 | — |
+| 0.0200 | 0.0200 | Race fixed effects | SOFT | 0.1000 | 0.1003 | 0.0003 | — | — | 0.0000 |
+| 0.0200 | 0.0300 | Race fixed effects | SOFT | 0.1000 | 0.1003 | 0.0003 | — | — | 0.0000 |
+| 0.0200 | 0.0400 | Race fixed effects | SOFT | 0.1000 | 0.1003 | 0.0003 | — | — | 0.0000 |
+| 0.0200 | 0.0200 | Race fixed effects | MEDIUM | 0.0600 | 0.0599 | -0.0001 | — | — | 0.0000 |
+| 0.0200 | 0.0300 | Race fixed effects | MEDIUM | 0.0600 | 0.0599 | -0.0001 | — | — | 0.0000 |
+| 0.0200 | 0.0400 | Race fixed effects | MEDIUM | 0.0600 | 0.0599 | -0.0001 | — | — | 0.0000 |
+| 0.0200 | 0.0200 | Race fixed effects | HARD | 0.0300 | 0.0292 | -0.0008 | — | — | 0.0000 |
+| 0.0200 | 0.0300 | Race fixed effects | HARD | 0.0300 | 0.0292 | -0.0008 | — | — | 0.0000 |
+| 0.0200 | 0.0400 | Race fixed effects | HARD | 0.0300 | 0.0292 | -0.0008 | — | — | 0.0000 |
 
-Circuit pools are shown only when at least 3 distinct races
-contribute; other circuit/compound combinations use the cross-circuit pool
-and are flagged as fallbacks by the API.
+Maximum spread in cross-circuit fixed-effects estimates across the 0.02, 0.03,
+and 0.04 s/kg assumptions:
 
-| fuel_effect_s_per_kg | circuit | compound | pooled_slope_seconds_per_lap | lower_95 | upper_95 | median_slope_seconds_per_lap | stints | races | bootstrap_replicates | pool_scope |
+| compound | max_abs_slope_change |
+| --- | --- |
+| HARD | 0.0000 |
+| MEDIUM | 0.0000 |
+| SOFT | 0.0000 |
+
+The within-stint estimates are shown only as a labelled sensitivity check:
+
+| assumed_fuel_effect_s_per_kg | compound | pooled_slope_seconds_per_lap | lower_95 | upper_95 | median_slope_seconds_per_lap | negative_stint_slope_share | stints | races | bootstrap_replicates | weighting |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 0.0200 | Abu Dhabi Grand Prix | HARD | 0.0404 | 0.0391 | 0.0411 | 0.0371 | 81 | 3 | 1000 | circuit-specific |
-| 0.0200 | Abu Dhabi Grand Prix | MEDIUM | 0.0930 | 0.0645 | 0.1149 | 0.0787 | 58 | 3 | 1000 | circuit-specific |
-| 0.0200 | Australian Grand Prix | HARD | -0.0147 | -0.0453 | 0.0328 | -0.0090 | 72 | 3 | 1000 | circuit-specific |
-| 0.0200 | Australian Grand Prix | MEDIUM | 0.0265 | -0.0269 | 0.0587 | 0.0075 | 23 | 3 | 1000 | circuit-specific |
-| 0.0200 | Austrian Grand Prix | HARD | 0.0624 | 0.0533 | 0.0679 | 0.0623 | 78 | 3 | 1000 | circuit-specific |
-| 0.0200 | Austrian Grand Prix | MEDIUM | 0.0670 | 0.0415 | 0.0915 | 0.0674 | 81 | 3 | 1000 | circuit-specific |
-| 0.0200 | Azerbaijan Grand Prix | HARD | 0.0006 | -0.0193 | 0.0174 | -0.0014 | 65 | 3 | 1000 | circuit-specific |
-| 0.0200 | Azerbaijan Grand Prix | MEDIUM | 0.0191 | -0.0225 | 0.0910 | 0.0200 | 36 | 3 | 1000 | circuit-specific |
-| 0.0200 | Bahrain Grand Prix | HARD | 0.0805 | 0.0767 | 0.1190 | 0.0782 | 73 | 3 | 1000 | circuit-specific |
-| 0.0200 | Bahrain Grand Prix | SOFT | 0.1373 | 0.0999 | 0.1663 | 0.1349 | 84 | 3 | 1000 | circuit-specific |
-| 0.0200 | Belgian Grand Prix | HARD | 0.0725 | 0.0337 | 0.3151 | 0.0561 | 38 | 3 | 1000 | circuit-specific |
-| 0.0200 | Belgian Grand Prix | MEDIUM | 0.1438 | 0.0555 | 0.1847 | 0.1171 | 72 | 3 | 1000 | circuit-specific |
-| 0.0200 | Belgian Grand Prix | SOFT | 0.1146 | 0.0016 | 0.1653 | 0.1116 | 27 | 3 | 1000 | circuit-specific |
-| 0.0200 | British Grand Prix | HARD | 0.0157 | -0.0009 | 0.0564 | 0.0141 | 18 | 3 | 1000 | circuit-specific |
-| 0.0200 | British Grand Prix | MEDIUM | -0.0461 | -0.4194 | 0.1966 | 0.0110 | 57 | 3 | 1000 | circuit-specific |
-| 0.0200 | British Grand Prix | SOFT | -0.0447 | -0.2704 | 0.1022 | 0.0184 | 41 | 3 | 1000 | circuit-specific |
-| 0.0200 | Canadian Grand Prix | HARD | 0.0096 | -0.2456 | 0.0250 | 0.0248 | 61 | 3 | 1000 | circuit-specific |
-| 0.0200 | Canadian Grand Prix | MEDIUM | -0.0769 | -0.2632 | 0.0081 | -0.0222 | 46 | 3 | 1000 | circuit-specific |
-| 0.0200 | Dutch Grand Prix | HARD | 0.0251 | -0.0345 | 0.0316 | 0.0271 | 35 | 3 | 1000 | circuit-specific |
-| 0.0200 | Dutch Grand Prix | MEDIUM | 0.0291 | 0.0070 | 0.0343 | 0.0301 | 51 | 3 | 1000 | circuit-specific |
-| 0.0200 | Dutch Grand Prix | SOFT | -0.1448 | -0.3041 | 0.0484 | 0.0295 | 67 | 3 | 1000 | circuit-specific |
-| 0.0200 | Hungarian Grand Prix | HARD | 0.0643 | 0.0558 | 0.0740 | 0.0674 | 67 | 3 | 1000 | circuit-specific |
-| 0.0200 | Hungarian Grand Prix | MEDIUM | 0.0511 | 0.0196 | 0.0686 | 0.0500 | 69 | 3 | 1000 | circuit-specific |
-| 0.0200 | Hungarian Grand Prix | SOFT | 0.1649 | -0.1234 | 0.1844 | 0.1577 | 22 | 3 | 1000 | circuit-specific |
-| 0.0200 | Italian Grand Prix | HARD | 0.0463 | 0.0281 | 0.0724 | 0.0461 | 58 | 3 | 1000 | circuit-specific |
-| 0.0200 | Italian Grand Prix | MEDIUM | 0.0396 | 0.0081 | 0.0719 | 0.0458 | 60 | 3 | 1000 | circuit-specific |
-| 0.0200 | Mexico City Grand Prix | HARD | -0.0193 | -0.1051 | 0.0470 | 0.0226 | 42 | 3 | 1000 | circuit-specific |
-| 0.0200 | Mexico City Grand Prix | MEDIUM | -0.0006 | -0.0681 | 0.0625 | 0.0374 | 60 | 3 | 1000 | circuit-specific |
-| 0.0200 | Miami Grand Prix | HARD | 0.0040 | -0.0117 | 0.0139 | 0.0068 | 56 | 3 | 1000 | circuit-specific |
-| 0.0200 | Miami Grand Prix | MEDIUM | -0.0056 | -0.0351 | 0.0129 | -0.0119 | 60 | 3 | 1000 | circuit-specific |
-| 0.0200 | Monaco Grand Prix | HARD | -0.0228 | -0.3270 | 0.0935 | -0.0089 | 35 | 3 | 1000 | circuit-specific |
-| 0.0200 | Monaco Grand Prix | MEDIUM | -0.0312 | -0.2381 | 0.1740 | -0.0597 | 29 | 3 | 1000 | circuit-specific |
-| 0.0200 | Saudi Arabian Grand Prix | HARD | -0.0288 | -0.0335 | -0.0256 | -0.0345 | 48 | 3 | 1000 | circuit-specific |
-| 0.0200 | Saudi Arabian Grand Prix | MEDIUM | -0.0120 | -0.0361 | 0.0316 | -0.0074 | 39 | 3 | 1000 | circuit-specific |
-| 0.0200 | Singapore Grand Prix | MEDIUM | -0.0121 | -0.2918 | 0.0529 | -0.0152 | 49 | 3 | 1000 | circuit-specific |
-| 0.0200 | Singapore Grand Prix | SOFT | -0.1037 | -0.2921 | 0.0209 | -0.0189 | 13 | 3 | 1000 | circuit-specific |
-| 0.0200 | Spanish Grand Prix | HARD | 0.0599 | 0.0547 | 0.1494 | 0.0528 | 36 | 3 | 1000 | circuit-specific |
-| 0.0200 | Spanish Grand Prix | MEDIUM | 0.0734 | 0.0488 | 0.0909 | 0.0715 | 60 | 3 | 1000 | circuit-specific |
-| 0.0200 | Spanish Grand Prix | SOFT | 0.1010 | 0.0366 | 0.1537 | 0.0935 | 91 | 3 | 1000 | circuit-specific |
-| 0.0200 | United States Grand Prix | HARD | 0.0220 | 0.0039 | 0.0482 | 0.0282 | 64 | 3 | 1000 | circuit-specific |
-| 0.0200 | United States Grand Prix | MEDIUM | 0.0319 | 0.0098 | 0.0647 | 0.0428 | 72 | 3 | 1000 | circuit-specific |
-| 0.0300 | Abu Dhabi Grand Prix | HARD | 0.0593 | 0.0580 | 0.0601 | 0.0560 | 81 | 3 | 1000 | circuit-specific |
-| 0.0300 | Abu Dhabi Grand Prix | MEDIUM | 0.1120 | 0.0835 | 0.1339 | 0.0977 | 58 | 3 | 1000 | circuit-specific |
-| 0.0300 | Australian Grand Prix | HARD | 0.0050 | -0.0246 | 0.0521 | 0.0102 | 72 | 3 | 1000 | circuit-specific |
-| 0.0300 | Australian Grand Prix | MEDIUM | 0.0459 | -0.0061 | 0.0780 | 0.0264 | 23 | 3 | 1000 | circuit-specific |
-| 0.0300 | Austrian Grand Prix | HARD | 0.0779 | 0.0688 | 0.0834 | 0.0778 | 78 | 3 | 1000 | circuit-specific |
-| 0.0300 | Austrian Grand Prix | MEDIUM | 0.0825 | 0.0570 | 0.1070 | 0.0829 | 81 | 3 | 1000 | circuit-specific |
-| 0.0300 | Azerbaijan Grand Prix | HARD | 0.0224 | 0.0023 | 0.0389 | 0.0201 | 65 | 3 | 1000 | circuit-specific |
-| 0.0300 | Azerbaijan Grand Prix | MEDIUM | 0.0409 | -0.0010 | 0.1125 | 0.0418 | 36 | 3 | 1000 | circuit-specific |
-| 0.0300 | Bahrain Grand Prix | HARD | 0.0998 | 0.0960 | 0.1383 | 0.0975 | 73 | 3 | 1000 | circuit-specific |
-| 0.0300 | Bahrain Grand Prix | SOFT | 0.1566 | 0.1334 | 0.1856 | 0.1542 | 84 | 3 | 1000 | circuit-specific |
-| 0.0300 | Belgian Grand Prix | HARD | 0.0975 | 0.0587 | 0.3401 | 0.0811 | 38 | 3 | 1000 | circuit-specific |
-| 0.0300 | Belgian Grand Prix | MEDIUM | 0.1688 | 0.0805 | 0.2097 | 0.1421 | 72 | 3 | 1000 | circuit-specific |
-| 0.0300 | Belgian Grand Prix | SOFT | 0.1396 | 0.0266 | 0.1903 | 0.1366 | 27 | 3 | 1000 | circuit-specific |
-| 0.0300 | British Grand Prix | HARD | 0.0369 | 0.0203 | 0.0775 | 0.0352 | 18 | 3 | 1000 | circuit-specific |
-| 0.0300 | British Grand Prix | MEDIUM | -0.0250 | -0.3983 | 0.1565 | 0.0321 | 57 | 3 | 1000 | circuit-specific |
-| 0.0300 | British Grand Prix | SOFT | -0.0236 | -0.2493 | 0.1234 | 0.0395 | 41 | 3 | 1000 | circuit-specific |
-| 0.0300 | Canadian Grand Prix | HARD | 0.0253 | -0.2299 | 0.0407 | 0.0405 | 61 | 3 | 1000 | circuit-specific |
-| 0.0300 | Canadian Grand Prix | MEDIUM | -0.0612 | -0.2475 | 0.0238 | -0.0064 | 46 | 3 | 1000 | circuit-specific |
-| 0.0300 | Dutch Grand Prix | HARD | 0.0404 | -0.0162 | 0.0469 | 0.0423 | 35 | 3 | 1000 | circuit-specific |
-| 0.0300 | Dutch Grand Prix | MEDIUM | 0.0448 | 0.0254 | 0.0496 | 0.0454 | 51 | 3 | 1000 | circuit-specific |
-| 0.0300 | Dutch Grand Prix | SOFT | -0.1279 | -0.2858 | 0.0637 | 0.0474 | 67 | 3 | 1000 | circuit-specific |
-| 0.0300 | Hungarian Grand Prix | HARD | 0.0800 | 0.0715 | 0.0897 | 0.0831 | 67 | 3 | 1000 | circuit-specific |
-| 0.0300 | Hungarian Grand Prix | MEDIUM | 0.0668 | 0.0353 | 0.0843 | 0.0657 | 69 | 3 | 1000 | circuit-specific |
-| 0.0300 | Hungarian Grand Prix | SOFT | 0.1806 | -0.1077 | 0.2002 | 0.1734 | 22 | 3 | 1000 | circuit-specific |
-| 0.0300 | Italian Grand Prix | HARD | 0.0678 | 0.0489 | 0.0940 | 0.0679 | 58 | 3 | 1000 | circuit-specific |
-| 0.0300 | Italian Grand Prix | MEDIUM | 0.0616 | 0.0289 | 0.0935 | 0.0692 | 60 | 3 | 1000 | circuit-specific |
-| 0.0300 | Mexico City Grand Prix | HARD | -0.0038 | -0.0896 | 0.0625 | 0.0381 | 42 | 3 | 1000 | circuit-specific |
-| 0.0300 | Mexico City Grand Prix | MEDIUM | 0.0149 | -0.0526 | 0.0780 | 0.0529 | 60 | 3 | 1000 | circuit-specific |
-| 0.0300 | Miami Grand Prix | HARD | 0.0233 | 0.0076 | 0.0332 | 0.0261 | 56 | 3 | 1000 | circuit-specific |
-| 0.0300 | Miami Grand Prix | MEDIUM | 0.0137 | -0.0158 | 0.0322 | 0.0074 | 60 | 3 | 1000 | circuit-specific |
-| 0.0300 | Monaco Grand Prix | HARD | -0.0060 | -0.3098 | 0.1135 | 0.0076 | 35 | 3 | 1000 | circuit-specific |
-| 0.0300 | Monaco Grand Prix | MEDIUM | -0.0142 | -0.1513 | 0.1940 | -0.0456 | 29 | 3 | 1000 | circuit-specific |
-| 0.0300 | Saudi Arabian Grand Prix | HARD | -0.0068 | -0.0115 | -0.0036 | -0.0125 | 48 | 3 | 1000 | circuit-specific |
-| 0.0300 | Saudi Arabian Grand Prix | MEDIUM | 0.0100 | -0.0141 | 0.0536 | 0.0146 | 39 | 3 | 1000 | circuit-specific |
-| 0.0300 | Singapore Grand Prix | MEDIUM | 0.0058 | -0.2732 | 0.0707 | 0.0026 | 49 | 3 | 1000 | circuit-specific |
-| 0.0300 | Singapore Grand Prix | SOFT | -0.0856 | -0.2735 | 0.0386 | -0.0003 | 13 | 3 | 1000 | circuit-specific |
-| 0.0300 | Spanish Grand Prix | HARD | 0.0766 | 0.0714 | 0.1661 | 0.0694 | 36 | 3 | 1000 | circuit-specific |
-| 0.0300 | Spanish Grand Prix | MEDIUM | 0.0901 | 0.0655 | 0.1202 | 0.0882 | 60 | 3 | 1000 | circuit-specific |
-| 0.0300 | Spanish Grand Prix | SOFT | 0.1177 | 0.0533 | 0.1704 | 0.1101 | 91 | 3 | 1000 | circuit-specific |
-| 0.0300 | United States Grand Prix | HARD | 0.0416 | 0.0235 | 0.0678 | 0.0478 | 64 | 3 | 1000 | circuit-specific |
-| 0.0300 | United States Grand Prix | MEDIUM | 0.0515 | 0.0295 | 0.0844 | 0.0625 | 72 | 3 | 1000 | circuit-specific |
-| 0.0400 | Abu Dhabi Grand Prix | HARD | 0.0783 | 0.0770 | 0.0790 | 0.0750 | 81 | 3 | 1000 | circuit-specific |
-| 0.0400 | Abu Dhabi Grand Prix | MEDIUM | 0.1309 | 0.1024 | 0.1528 | 0.1167 | 58 | 3 | 1000 | circuit-specific |
-| 0.0400 | Australian Grand Prix | HARD | 0.0247 | -0.0038 | 0.0714 | 0.0293 | 72 | 3 | 1000 | circuit-specific |
-| 0.0400 | Australian Grand Prix | MEDIUM | 0.0652 | 0.0147 | 0.0973 | 0.0454 | 23 | 3 | 1000 | circuit-specific |
-| 0.0400 | Austrian Grand Prix | HARD | 0.0934 | 0.0843 | 0.0989 | 0.0933 | 78 | 3 | 1000 | circuit-specific |
-| 0.0400 | Austrian Grand Prix | MEDIUM | 0.0980 | 0.0725 | 0.1225 | 0.0984 | 81 | 3 | 1000 | circuit-specific |
-| 0.0400 | Azerbaijan Grand Prix | HARD | 0.0441 | 0.0239 | 0.0605 | 0.0417 | 65 | 3 | 1000 | circuit-specific |
-| 0.0400 | Azerbaijan Grand Prix | MEDIUM | 0.0627 | 0.0206 | 0.1341 | 0.0636 | 36 | 3 | 1000 | circuit-specific |
-| 0.0400 | Bahrain Grand Prix | HARD | 0.1191 | 0.1153 | 0.1576 | 0.1168 | 73 | 3 | 1000 | circuit-specific |
-| 0.0400 | Bahrain Grand Prix | SOFT | 0.1759 | 0.1385 | 0.2049 | 0.1735 | 84 | 3 | 1000 | circuit-specific |
-| 0.0400 | Belgian Grand Prix | HARD | 0.1225 | 0.0837 | 0.3651 | 0.1061 | 38 | 3 | 1000 | circuit-specific |
-| 0.0400 | Belgian Grand Prix | MEDIUM | 0.1938 | 0.1055 | 0.2347 | 0.1671 | 72 | 3 | 1000 | circuit-specific |
-| 0.0400 | Belgian Grand Prix | SOFT | 0.1646 | 0.0516 | 0.2153 | 0.1616 | 27 | 3 | 1000 | circuit-specific |
-| 0.0400 | British Grand Prix | HARD | 0.0580 | 0.0414 | 0.0987 | 0.0564 | 18 | 3 | 1000 | circuit-specific |
-| 0.0400 | British Grand Prix | MEDIUM | -0.0038 | -0.3771 | 0.2390 | 0.0533 | 57 | 3 | 1000 | circuit-specific |
-| 0.0400 | British Grand Prix | SOFT | -0.0024 | -0.2281 | 0.1445 | 0.0607 | 41 | 3 | 1000 | circuit-specific |
-| 0.0400 | Canadian Grand Prix | HARD | 0.0411 | -0.2141 | 0.0564 | 0.0562 | 61 | 3 | 1000 | circuit-specific |
-| 0.0400 | Canadian Grand Prix | MEDIUM | -0.0455 | -0.2318 | 0.0395 | 0.0093 | 46 | 3 | 1000 | circuit-specific |
-| 0.0400 | Dutch Grand Prix | HARD | 0.0558 | 0.0022 | 0.0622 | 0.0576 | 35 | 3 | 1000 | circuit-specific |
-| 0.0400 | Dutch Grand Prix | MEDIUM | 0.0605 | 0.0437 | 0.0648 | 0.0607 | 51 | 3 | 1000 | circuit-specific |
-| 0.0400 | Dutch Grand Prix | SOFT | -0.1110 | -0.2674 | 0.0790 | 0.0646 | 67 | 3 | 1000 | circuit-specific |
-| 0.0400 | Hungarian Grand Prix | HARD | 0.0958 | 0.0872 | 0.1054 | 0.0989 | 67 | 3 | 1000 | circuit-specific |
-| 0.0400 | Hungarian Grand Prix | MEDIUM | 0.0825 | 0.0510 | 0.1000 | 0.0815 | 69 | 3 | 1000 | circuit-specific |
-| 0.0400 | Hungarian Grand Prix | SOFT | 0.1963 | -0.0920 | 0.2159 | 0.1891 | 22 | 3 | 1000 | circuit-specific |
-| 0.0400 | Italian Grand Prix | HARD | 0.0893 | 0.0696 | 0.1155 | 0.0899 | 58 | 3 | 1000 | circuit-specific |
-| 0.0400 | Italian Grand Prix | MEDIUM | 0.0837 | 0.0496 | 0.1151 | 0.0919 | 60 | 3 | 1000 | circuit-specific |
-| 0.0400 | Mexico City Grand Prix | HARD | 0.0117 | -0.0741 | 0.0780 | 0.0536 | 42 | 3 | 1000 | circuit-specific |
-| 0.0400 | Mexico City Grand Prix | MEDIUM | 0.0304 | -0.0371 | 0.0935 | 0.0684 | 60 | 3 | 1000 | circuit-specific |
-| 0.0400 | Miami Grand Prix | HARD | 0.0426 | 0.0269 | 0.0525 | 0.0454 | 56 | 3 | 1000 | circuit-specific |
-| 0.0400 | Miami Grand Prix | MEDIUM | 0.0330 | 0.0035 | 0.0515 | 0.0267 | 60 | 3 | 1000 | circuit-specific |
-| 0.0400 | Monaco Grand Prix | HARD | 0.0109 | -0.2926 | 0.1335 | 0.0217 | 35 | 3 | 1000 | circuit-specific |
-| 0.0400 | Monaco Grand Prix | MEDIUM | 0.0027 | -0.2038 | 0.2140 | -0.0315 | 29 | 3 | 1000 | circuit-specific |
-| 0.0400 | Saudi Arabian Grand Prix | HARD | 0.0152 | 0.0105 | 0.0184 | 0.0095 | 48 | 3 | 1000 | circuit-specific |
-| 0.0400 | Saudi Arabian Grand Prix | MEDIUM | 0.0320 | 0.0079 | 0.0756 | 0.0366 | 39 | 3 | 1000 | circuit-specific |
-| 0.0400 | Singapore Grand Prix | MEDIUM | 0.0237 | -0.2546 | 0.0884 | 0.0203 | 49 | 3 | 1000 | circuit-specific |
-| 0.0400 | Singapore Grand Prix | SOFT | -0.0675 | -0.2549 | 0.0564 | 0.0183 | 13 | 3 | 1000 | circuit-specific |
-| 0.0400 | Spanish Grand Prix | HARD | 0.0933 | 0.0881 | 0.1828 | 0.0861 | 36 | 3 | 1000 | circuit-specific |
-| 0.0400 | Spanish Grand Prix | MEDIUM | 0.1067 | 0.0822 | 0.1368 | 0.1048 | 60 | 3 | 1000 | circuit-specific |
-| 0.0400 | Spanish Grand Prix | SOFT | 0.1343 | 0.0700 | 0.1870 | 0.1268 | 91 | 3 | 1000 | circuit-specific |
-| 0.0400 | United States Grand Prix | HARD | 0.0613 | 0.0432 | 0.0875 | 0.0675 | 64 | 3 | 1000 | circuit-specific |
-| 0.0400 | United States Grand Prix | MEDIUM | 0.0712 | 0.0491 | 0.1040 | 0.0821 | 72 | 3 | 1000 | circuit-specific |
-
-### Corrected race fixed-effects cross-check
-
-This model uses one driver fixed effect per race, race-lap fixed effects,
-compound intercepts, and a separate tyre-age slope for each compound. A race
-is used only if its design has full column rank.
-
-Rank/failure status by race:
-
-| race_id | circuit | status | design_rank | design_columns | condition_number |
-| --- | --- | --- | --- | --- | --- |
-| 2022-1 | Bahrain Grand Prix | full_rank | 75 | 75 | 407.3103 |
-| 2022-10 | British Grand Prix | full_rank | 67 | 67 | 525.8315 |
-| 2022-11 | Austrian Grand Prix | full_rank | 91 | 91 | 710.6742 |
-| 2022-12 | French Grand Prix | full_rank | 70 | 70 | 731.1118 |
-| 2022-13 | Hungarian Grand Prix | full_rank | 91 | 91 | 751.6171 |
-| 2022-14 | Belgian Grand Prix | full_rank | 62 | 62 | 277.0926 |
-| 2022-15 | Dutch Grand Prix | full_rank | 90 | 90 | 585.0678 |
-| 2022-16 | Italian Grand Prix | full_rank | 69 | 69 | 489.1822 |
-| 2022-17 | Singapore Grand Prix | full_rank | 44 | 44 | 1600.5130 |
-| 2022-19 | United States Grand Prix | rank_deficient | 69 | 70 | 446757689850501888.0000 |
-| 2022-2 | Saudi Arabian Grand Prix | full_rank | 61 | 61 | 711.0486 |
-| 2022-20 | Mexico City Grand Prix | full_rank | 94 | 94 | 1146.8678 |
-| 2022-21 | São Paulo Grand Prix | full_rank | 81 | 81 | 673.3036 |
-| 2022-22 | Abu Dhabi Grand Prix | full_rank | 81 | 81 | 761.1332 |
-| 2022-3 | Australian Grand Prix | full_rank | 68 | 68 | 989.1712 |
-| 2022-4 | Emilia Romagna Grand Prix | full_rank | 68 | 68 | 12719.8090 |
-| 2022-5 | Miami Grand Prix | full_rank | 74 | 74 | 798.8907 |
-| 2022-6 | Spanish Grand Prix | full_rank | 89 | 89 | 618.0700 |
-| 2022-7 | Monaco Grand Prix | rank_deficient | 75 | 76 | 124232325109571440.0000 |
-| 2022-8 | Azerbaijan Grand Prix | full_rank | 70 | 70 | 664.0393 |
-| 2022-9 | Canadian Grand Prix | full_rank | 82 | 82 | 1108.1187 |
-| 2023-1 | Bahrain Grand Prix | full_rank | 80 | 80 | 544.8807 |
-| 2023-10 | British Grand Prix | full_rank | 69 | 69 | 595.1532 |
-| 2023-11 | Hungarian Grand Prix | full_rank | 91 | 91 | 1177.9915 |
-| 2023-12 | Belgian Grand Prix | full_rank | 66 | 66 | 333.3428 |
-| 2023-13 | Dutch Grand Prix | full_rank | 77 | 77 | 1568.6960 |
-| 2023-14 | Italian Grand Prix | full_rank | 71 | 71 | 723.0163 |
-| 2023-15 | Singapore Grand Prix | full_rank | 79 | 79 | 918.3994 |
-| 2023-16 | Japanese Grand Prix | full_rank | 72 | 72 | 506.4627 |
-| 2023-17 | Qatar Grand Prix | full_rank | 75 | 75 | 466.9908 |
-| 2023-18 | United States Grand Prix | full_rank | 79 | 79 | 572.7320 |
-| 2023-19 | Mexico City Grand Prix | full_rank | 89 | 89 | 1049.1202 |
-| 2023-2 | Saudi Arabian Grand Prix | full_rank | 70 | 70 | 807.9217 |
-| 2023-20 | São Paulo Grand Prix | full_rank | 87 | 87 | 785.8599 |
-| 2023-21 | Las Vegas Grand Prix | full_rank | 64 | 64 | 2329.4115 |
-| 2023-22 | Abu Dhabi Grand Prix | full_rank | 79 | 79 | 774.7301 |
-| 2023-3 | Australian Grand Prix | full_rank | 68 | 68 | 1999.5675 |
-| 2023-4 | Azerbaijan Grand Prix | rank_deficient | 70 | 71 | 2108367377232834304.0000 |
-| 2023-5 | Miami Grand Prix | full_rank | 80 | 80 | 1348.2729 |
-| 2023-6 | Monaco Grand Prix | full_rank | 78 | 78 | 1218.6418 |
-| 2023-7 | Spanish Grand Prix | full_rank | 89 | 89 | 805.4954 |
-| 2023-8 | Canadian Grand Prix | full_rank | 87 | 87 | 1173.2138 |
-| 2023-9 | Austrian Grand Prix | rank_deficient | 89 | 90 | 1599954538605961216.0000 |
-| 2024-1 | Bahrain Grand Prix | full_rank | 78 | 78 | 725.9314 |
-| 2024-10 | Spanish Grand Prix | full_rank | 89 | 89 | 670.4987 |
-| 2024-11 | Austrian Grand Prix | full_rank | 94 | 94 | 856.0178 |
-| 2024-12 | British Grand Prix | full_rank | 63 | 63 | 481.5259 |
-| 2024-13 | Hungarian Grand Prix | full_rank | 93 | 93 | 1007.6516 |
-| 2024-14 | Belgian Grand Prix | full_rank | 67 | 67 | 410.6161 |
-| 2024-15 | Dutch Grand Prix | full_rank | 95 | 95 | 1380.6814 |
-| 2024-16 | Italian Grand Prix | rank_deficient | 75 | 76 | 1326689465013512960.0000 |
-| 2024-17 | Azerbaijan Grand Prix | full_rank | 71 | 71 | 1032.9639 |
-| 2024-18 | Singapore Grand Prix | full_rank | 85 | 85 | 872.3390 |
-| 2024-19 | United States Grand Prix | full_rank | 75 | 75 | 2020.1701 |
-| 2024-2 | Saudi Arabian Grand Prix | full_rank | 69 | 69 | 1193.8098 |
-| 2024-20 | Mexico City Grand Prix | full_rank | 87 | 87 | 1267.4620 |
-| 2024-22 | Las Vegas Grand Prix | full_rank | 73 | 73 | 719.0287 |
-| 2024-23 | Qatar Grand Prix | full_rank | 67 | 67 | 998.8065 |
-| 2024-24 | Abu Dhabi Grand Prix | full_rank | 78 | 78 | 955.5593 |
-| 2024-3 | Australian Grand Prix | full_rank | 78 | 78 | 798.8299 |
-| 2024-4 | Japanese Grand Prix | full_rank | 73 | 73 | 515.8710 |
-| 2024-5 | Chinese Grand Prix | full_rank | 69 | 69 | 750.2103 |
-| 2024-6 | Miami Grand Prix | full_rank | 74 | 74 | 674.2021 |
-| 2024-7 | Emilia Romagna Grand Prix | full_rank | 86 | 86 | 1168.8251 |
-| 2024-8 | Monaco Grand Prix | full_rank | 96 | 96 | 2716.3552 |
-| 2024-9 | Canadian Grand Prix | rank_deficient | 46 | 47 | 65659383071576104.0000 |
-
-Random-effects pooled cross-check slopes:
-
-| compound | pooled_slope_seconds_per_lap | lower_95 | upper_95 | race_estimates | negative_slope_share | tau_squared |
-| --- | --- | --- | --- | --- | --- | --- |
-| HARD | 0.0507 | 0.0438 | 0.0576 | 58 | 0.0690 | 0.0006 |
-| MEDIUM | 0.0629 | 0.0542 | 0.0717 | 59 | 0.0339 | 0.0010 |
-| SOFT | 0.0910 | 0.0753 | 0.1067 | 52 | 0.1154 | 0.0021 |
-
-The cross-check is not the primary estimate. Its coverage is limited to the
-full-rank races listed above.
+| 0.0200 | HARD | 0.0217 | 0.0078 | 0.0334 | 0.0356 | 0.2596 | 1175 | 64 | 1000 | stint lap count |
+| 0.0200 | MEDIUM | 0.0221 | -0.0033 | 0.0445 | 0.0434 | 0.2956 | 1167 | 65 | 1000 | stint lap count |
+| 0.0200 | SOFT | 0.0229 | -0.0548 | 0.0905 | 0.0690 | 0.1898 | 469 | 39 | 1000 | stint lap count |
+| 0.0300 | HARD | 0.0405 | 0.0274 | 0.0524 | 0.0530 | 0.1779 | 1175 | 64 | 1000 | stint lap count |
+| 0.0300 | MEDIUM | 0.0404 | 0.0137 | 0.0655 | 0.0608 | 0.2339 | 1167 | 65 | 1000 | stint lap count |
+| 0.0300 | SOFT | 0.0409 | -0.0361 | 0.1097 | 0.0860 | 0.1301 | 469 | 39 | 1000 | stint lap count |
+| 0.0400 | HARD | 0.0592 | 0.0463 | 0.0708 | 0.0715 | 0.1013 | 1175 | 64 | 1000 | stint lap count |
+| 0.0400 | MEDIUM | 0.0588 | 0.0322 | 0.0810 | 0.0791 | 0.1740 | 1167 | 65 | 1000 | stint lap count |
+| 0.0400 | SOFT | 0.0590 | -0.0164 | 0.1244 | 0.1035 | 0.0959 | 469 | 39 | 1000 | stint lap count |
 
 ## Synthetic parameter recovery
-
-Synthetic races have known degradation rates (SOFT 0.10, MEDIUM 0.06, HARD
-0.03 s/lap), 110 kg starting fuel, the assumed 0.03 s/kg fuel effect, driver
-pace differences, varied pit schedules, used-tyre starting ages, and 0.22 s
-lap noise.
 
 | method | compound | true_slope | recovered_slope | error | full_rank_races | rank | columns |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -326,131 +172,137 @@ lap noise.
 | Corrected race fixed effects | HARD | 0.0300 | 0.0304 | 0.0004 | 12 | — | — |
 | Flawed v2 design | all | — | — | — | 0 | 121.0000 | 124.0000 |
 
-The primary method is considered to recover synthetic truth only when each
-pooled estimate is within 0.03 s/lap of its known slope. The flawed v2 design
-is not assigned a recovered slope when rank deficient.
+Fuel mismatch is reported separately above; recovery is not evidence that
+real-world confounding has been eliminated.
 
-## Out-of-sample evaluation
+## Held-out evaluation
 
-No random split is used. Leave-one-race-out withholds all laps and stints from
-each race. The chronological holdout trains on 2022-2023 and tests on 2024.
-The relative lap target is fuel-corrected time minus that stint's first-three-
-clean-lap median. Slope error compares each held-out stint's prediction with
-that stint's directly observed OLS slope. The zero baseline predicts no
-relative degradation and a slope of zero.
+Relative lap-time MAE compares the headline fixed-effects pools with a
+zero-degradation baseline. Eligible and low-data races are summarized
+separately. Leave-one-race-out excludes the held-out race from the training
+pools. The chronological evaluation trains on 2022-2023 and tests on 2024.
 
-Leave-one-race-out summary:
+### Summary; only eligible rows are the headline
 
-| validation | races | baseline_relative_mae_seconds | model_relative_mae_seconds | baseline_stint_slope_mae_seconds_per_lap | model_stint_slope_mae_seconds_per_lap | plausible_observed_slope_share | unpooled_stints |
+| validation | data_group | races | laps | stints | baseline_relative_mae_seconds | model_relative_mae_seconds | cross_circuit_fallback_stints |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| leave-one-race-out | 66 | 1.1153 | 1.0784 | 0.1053 | 0.0929 | 0.7516 | 0 |
+| leave-one-race-out | eligible | 64 | 57906 | 2779 | 1.0434 | 1.0199 | 2779 |
+| leave-one-race-out | low_data | 2 | 553 | 32 | 3.4149 | 3.9785 | 32 |
+| train 2022-2023, test 2024 | eligible | 22 | 20841 | 934 | 0.9292 | 0.8426 | 934 |
+| train 2022-2023, test 2024 | low_data | 1 | 290 | 18 | 3.2058 | 3.7747 | 18 |
 
-Chronological summary:
+### 2024 chronological races
 
-| validation | races | baseline_relative_mae_seconds | model_relative_mae_seconds | baseline_stint_slope_mae_seconds_per_lap | model_stint_slope_mae_seconds_per_lap | plausible_observed_slope_share | unpooled_stints |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| train 2022-2023, test 2024 | 23 | 0.9818 | 0.8704 | 0.0942 | 0.0738 | 0.8571 | 0 |
+| race_id | year | round | circuit | clean_laps | quality_status | laps | stints | baseline_relative_mae_seconds | model_relative_mae_seconds | cross_circuit_fallback_stints |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 2024-1 | 2024 | 1 | Bahrain Grand Prix | 1024 | eligible | 1010 | 60 | 0.8499 | 0.5031 | 60 |
+| 2024-10 | 2024 | 10 | Spanish Grand Prix | 1206 | eligible | 1192 | 60 | 0.9781 | 0.5747 | 60 |
+| 2024-11 | 2024 | 11 | Austrian Grand Prix | 1269 | eligible | 1263 | 61 | 0.9490 | 0.4621 | 61 |
+| 2024-12 | 2024 | 12 | British Grand Prix | 662 | eligible | 651 | 37 | 1.4419 | 1.1993 | 37 |
+| 2024-13 | 2024 | 13 | Hungarian Grand Prix | 1254 | eligible | 1209 | 49 | 1.0449 | 0.7070 | 49 |
+| 2024-14 | 2024 | 14 | Belgian Grand Prix | 751 | eligible | 712 | 46 | 0.5834 | 0.4438 | 46 |
+| 2024-15 | 2024 | 15 | Dutch Grand Prix | 1354 | eligible | 1354 | 46 | 0.9704 | 0.4999 | 46 |
+| 2024-16 | 2024 | 16 | Italian Grand Prix | 927 | eligible | 918 | 47 | 0.6127 | 0.5172 | 47 |
+| 2024-17 | 2024 | 17 | Azerbaijan Grand Prix | 881 | eligible | 881 | 36 | 0.6398 | 0.8053 | 36 |
+| 2024-18 | 2024 | 18 | Singapore Grand Prix | 1109 | eligible | 1099 | 40 | 0.8847 | 0.7113 | 40 |
+| 2024-19 | 2024 | 19 | United States Grand Prix | 937 | eligible | 933 | 40 | 0.6336 | 0.7591 | 40 |
+| 2024-2 | 2024 | 2 | Saudi Arabian Grand Prix | 816 | eligible | 735 | 22 | 0.5514 | 1.0743 | 22 |
+| 2024-20 | 2024 | 20 | Mexico City Grand Prix | 1061 | eligible | 1048 | 35 | 0.7621 | 0.5751 | 35 |
+| 2024-22 | 2024 | 22 | Las Vegas Grand Prix | 826 | eligible | 790 | 50 | 0.6985 | 0.6955 | 50 |
+| 2024-23 | 2024 | 23 | Qatar Grand Prix | 717 | eligible | 702 | 34 | 0.9886 | 1.5966 | 34 |
+| 2024-24 | 2024 | 24 | Abu Dhabi Grand Prix | 921 | eligible | 908 | 39 | 0.8042 | 0.3805 | 39 |
+| 2024-3 | 2024 | 3 | Australian Grand Prix | 857 | eligible | 776 | 40 | 0.5773 | 0.4499 | 40 |
+| 2024-4 | 2024 | 4 | Japanese Grand Prix | 790 | eligible | 764 | 46 | 1.4538 | 1.1703 | 46 |
+| 2024-5 | 2024 | 5 | Chinese Grand Prix | 762 | eligible | 669 | 42 | 0.9607 | 0.5682 | 42 |
+| 2024-6 | 2024 | 6 | Miami Grand Prix | 934 | eligible | 913 | 43 | 0.5110 | 0.5840 | 43 |
+| 2024-7 | 2024 | 7 | Emilia Romagna Grand Prix | 1164 | eligible | 1136 | 40 | 1.2419 | 0.5415 | 40 |
+| 2024-8 | 2024 | 8 | Monaco Grand Prix | 1187 | eligible | 1178 | 21 | 2.3051 | 3.7451 | 21 |
+| 2024-9 | 2024 | 9 | Canadian Grand Prix | 318 | low_data | 290 | 18 | 3.2058 | 3.8025 | 18 |
 
-Per-race leave-one-out errors:
+### Per-race leave-one-out results, including low-data rows
 
-| race_id | year | round | circuit | laps | stints | baseline_relative_mae | model_relative_mae | baseline_slope_mae | model_slope_mae | plausible_observed_slope_share | unpooled_stints |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 2022-1 | 2022 | 1 | Bahrain Grand Prix | 748 | 55 | 1.0747 | 0.8826 | 0.1669 | 0.1312 | 1.0000 | 0 |
-| 2022-10 | 2022 | 10 | British Grand Prix | 656 | 41 | 1.5670 | 1.6906 | 0.3427 | 0.3591 | 0.4878 | 0 |
-| 2022-11 | 2022 | 11 | Austrian Grand Prix | 839 | 42 | 0.9663 | 0.6365 | 0.0824 | 0.0527 | 0.9524 | 0 |
-| 2022-12 | 2022 | 12 | French Grand Prix | 800 | 39 | 0.6790 | 0.5423 | 0.0739 | 0.0412 | 0.9744 | 0 |
-| 2022-13 | 2022 | 13 | Hungarian Grand Prix | 1200 | 59 | 0.9649 | 0.7406 | 0.1265 | 0.0895 | 1.0000 | 0 |
-| 2022-14 | 2022 | 14 | Belgian Grand Prix | 602 | 46 | 1.1018 | 0.9094 | 0.1973 | 0.1587 | 1.0000 | 0 |
-| 2022-15 | 2022 | 15 | Dutch Grand Prix | 1072 | 68 | 0.6234 | 0.4184 | 0.0625 | 0.0386 | 0.8971 | 0 |
-| 2022-16 | 2022 | 16 | Italian Grand Prix | 770 | 38 | 0.6729 | 0.5168 | 0.0567 | 0.0305 | 0.9211 | 0 |
-| 2022-17 | 2022 | 17 | Singapore Grand Prix | 263 | 14 | 3.6240 | 3.9638 | 0.3035 | 0.3471 | 0.0000 | 0 |
-| 2022-19 | 2022 | 19 | United States Grand Prix | 733 | 45 | 0.6559 | 0.6164 | 0.0642 | 0.0437 | 0.8889 | 0 |
-| 2022-2 | 2022 | 2 | Saudi Arabian Grand Prix | 639 | 34 | 0.8360 | 1.1029 | 0.0592 | 0.0657 | 0.5588 | 0 |
-| 2022-20 | 2022 | 20 | Mexico City Grand Prix | 1283 | 42 | 0.8350 | 0.6170 | 0.0537 | 0.0224 | 1.0000 | 0 |
-| 2022-21 | 2022 | 21 | São Paulo Grand Prix | 930 | 57 | 0.7557 | 0.5511 | 0.0741 | 0.0532 | 0.8596 | 0 |
-| 2022-22 | 2022 | 22 | Abu Dhabi Grand Prix | 1026 | 50 | 0.9222 | 0.6168 | 0.1005 | 0.0643 | 0.9800 | 0 |
-| 2022-3 | 2022 | 3 | Australian Grand Prix | 802 | 36 | 1.0552 | 1.3753 | 0.0360 | 0.0535 | 0.4444 | 0 |
-| 2022-4 | 2022 | 4 | Emilia Romagna Grand Prix | 771 | 23 | 2.3760 | 3.1123 | 0.0700 | 0.0989 | 0.2174 | 0 |
-| 2022-5 | 2022 | 5 | Miami Grand Prix | 865 | 41 | 0.5527 | 0.7105 | 0.0454 | 0.0614 | 0.4390 | 0 |
-| 2022-6 | 2022 | 6 | Spanish Grand Prix | 1093 | 69 | 1.1789 | 0.9417 | 0.1632 | 0.1320 | 0.9710 | 0 |
-| 2022-7 | 2022 | 7 | Monaco Grand Prix | 520 | 18 | 5.4956 | 6.0977 | 0.2703 | 0.3139 | 0.0000 | 0 |
-| 2022-8 | 2022 | 8 | Azerbaijan Grand Prix | 686 | 35 | 0.7012 | 0.7029 | 0.0760 | 0.0553 | 0.8857 | 0 |
-| 2022-9 | 2022 | 9 | Canadian Grand Prix | 985 | 43 | 0.7777 | 0.6611 | 0.0380 | 0.0331 | 0.7907 | 0 |
-| 2023-1 | 2023 | 1 | Bahrain Grand Prix | 877 | 61 | 0.8202 | 0.5790 | 0.1331 | 0.0961 | 1.0000 | 0 |
-| 2023-10 | 2023 | 10 | British Grand Prix | 774 | 38 | 0.5310 | 0.3829 | 0.0357 | 0.0254 | 0.8684 | 0 |
-| 2023-11 | 2023 | 11 | Hungarian Grand Prix | 1131 | 50 | 0.8579 | 0.6120 | 0.0682 | 0.0449 | 0.8800 | 0 |
-| 2023-12 | 2023 | 12 | Belgian Grand Prix | 675 | 45 | 1.4922 | 1.2836 | 0.1918 | 0.1583 | 0.9556 | 0 |
-| 2023-13 | 2023 | 13 | Dutch Grand Prix | 786 | 39 | 3.1527 | 3.5183 | 0.3669 | 0.3764 | 0.6923 | 0 |
-| 2023-14 | 2023 | 14 | Italian Grand Prix | 878 | 44 | 0.8503 | 0.5415 | 0.0949 | 0.0604 | 0.9545 | 0 |
-| 2023-15 | 2023 | 15 | Singapore Grand Prix | 958 | 42 | 0.9805 | 1.1702 | 0.0571 | 0.0645 | 0.5476 | 0 |
-| 2023-16 | 2023 | 16 | Japanese Grand Prix | 660 | 42 | 0.9506 | 0.6861 | 0.1321 | 0.0927 | 1.0000 | 0 |
-| 2023-17 | 2023 | 17 | Qatar Grand Prix | 784 | 58 | 0.6318 | 0.6857 | 0.0870 | 0.0953 | 0.4655 | 0 |
-| 2023-18 | 2023 | 18 | United States Grand Prix | 895 | 51 | 0.7106 | 0.5645 | 0.0776 | 0.0558 | 0.8235 | 0 |
-| 2023-19 | 2023 | 19 | Mexico City Grand Prix | 1088 | 41 | 1.5043 | 1.3767 | 0.1543 | 0.1454 | 0.6098 | 0 |
-| 2023-2 | 2023 | 2 | Saudi Arabian Grand Prix | 798 | 36 | 0.8358 | 1.0845 | 0.0452 | 0.0627 | 0.3889 | 0 |
-| 2023-20 | 2023 | 20 | São Paulo Grand Prix | 981 | 49 | 1.0309 | 0.8634 | 0.1720 | 0.1647 | 0.6531 | 0 |
-| 2023-21 | 2023 | 21 | Las Vegas Grand Prix | 710 | 40 | 0.9355 | 1.1521 | 0.0810 | 0.1032 | 0.3250 | 0 |
-| 2023-22 | 2023 | 22 | Abu Dhabi Grand Prix | 1055 | 54 | 0.6619 | 0.4065 | 0.0689 | 0.0339 | 0.9815 | 0 |
-| 2023-3 | 2023 | 3 | Australian Grand Prix | 706 | 19 | 1.3824 | 2.1814 | 0.0494 | 0.0817 | 0.1579 | 0 |
-| 2023-4 | 2023 | 4 | Azerbaijan Grand Prix | 799 | 31 | 0.5323 | 0.8266 | 0.0218 | 0.0445 | 0.4516 | 0 |
-| 2023-5 | 2023 | 5 | Miami Grand Prix | 1073 | 37 | 0.7346 | 0.5731 | 0.0292 | 0.0269 | 0.7838 | 0 |
-| 2023-6 | 2023 | 6 | Monaco Grand Prix | 999 | 27 | 1.7370 | 1.8186 | 0.2503 | 0.2259 | 0.7778 | 0 |
-| 2023-7 | 2023 | 7 | Spanish Grand Prix | 1184 | 58 | 0.7803 | 0.5583 | 0.0711 | 0.0438 | 0.9483 | 0 |
-| 2023-8 | 2023 | 8 | Canadian Grand Prix | 1066 | 46 | 0.6029 | 0.5557 | 0.0339 | 0.0295 | 0.7391 | 0 |
-| 2023-9 | 2023 | 9 | Austrian Grand Prix | 1168 | 56 | 0.8283 | 0.5105 | 0.0662 | 0.0418 | 0.8393 | 0 |
-| 2024-1 | 2024 | 1 | Bahrain Grand Prix | 1010 | 60 | 0.8499 | 0.5934 | 0.1073 | 0.0700 | 0.9833 | 0 |
-| 2024-10 | 2024 | 10 | Spanish Grand Prix | 1192 | 60 | 0.9781 | 0.6977 | 0.0867 | 0.0539 | 0.9500 | 0 |
-| 2024-11 | 2024 | 11 | Austrian Grand Prix | 1263 | 61 | 0.9490 | 0.5970 | 0.0987 | 0.0607 | 1.0000 | 0 |
-| 2024-12 | 2024 | 12 | British Grand Prix | 651 | 37 | 1.4419 | 1.2647 | 0.1831 | 0.1553 | 0.8919 | 0 |
-| 2024-13 | 2024 | 13 | Hungarian Grand Prix | 1209 | 49 | 1.0449 | 0.7467 | 0.0873 | 0.0558 | 0.9388 | 0 |
-| 2024-14 | 2024 | 14 | Belgian Grand Prix | 712 | 46 | 0.5834 | 0.4181 | 0.0780 | 0.0502 | 0.9565 | 0 |
-| 2024-15 | 2024 | 15 | Dutch Grand Prix | 1354 | 46 | 0.9704 | 0.5174 | 0.0518 | 0.0222 | 0.9565 | 0 |
-| 2024-16 | 2024 | 16 | Italian Grand Prix | 918 | 47 | 0.6127 | 0.4841 | 0.0534 | 0.0360 | 0.8298 | 0 |
-| 2024-17 | 2024 | 17 | Azerbaijan Grand Prix | 881 | 36 | 0.6398 | 0.7287 | 0.0547 | 0.0478 | 0.7500 | 0 |
-| 2024-18 | 2024 | 18 | Singapore Grand Prix | 1099 | 40 | 0.8847 | 0.6587 | 0.0679 | 0.0375 | 0.9250 | 0 |
-| 2024-19 | 2024 | 19 | United States Grand Prix | 933 | 40 | 0.6336 | 0.6772 | 0.0395 | 0.0353 | 0.7500 | 0 |
-| 2024-2 | 2024 | 2 | Saudi Arabian Grand Prix | 735 | 22 | 0.5514 | 0.9118 | 0.0292 | 0.0481 | 0.4545 | 0 |
-| 2024-20 | 2024 | 20 | Mexico City Grand Prix | 1048 | 35 | 0.7621 | 0.5582 | 0.0626 | 0.0338 | 1.0000 | 0 |
-| 2024-22 | 2024 | 22 | Las Vegas Grand Prix | 790 | 50 | 0.6985 | 0.6871 | 0.1005 | 0.0775 | 0.9000 | 0 |
-| 2024-23 | 2024 | 23 | Qatar Grand Prix | 702 | 34 | 0.9886 | 1.3801 | 0.0686 | 0.0927 | 0.2647 | 0 |
-| 2024-24 | 2024 | 24 | Abu Dhabi Grand Prix | 908 | 39 | 0.8042 | 0.4343 | 0.0901 | 0.0511 | 1.0000 | 0 |
-| 2024-3 | 2024 | 3 | Australian Grand Prix | 776 | 40 | 0.5773 | 0.4437 | 0.0568 | 0.0306 | 0.9250 | 0 |
-| 2024-4 | 2024 | 4 | Japanese Grand Prix | 764 | 46 | 1.4538 | 1.2156 | 0.2902 | 0.2682 | 0.8261 | 0 |
-| 2024-5 | 2024 | 5 | Chinese Grand Prix | 669 | 42 | 0.9607 | 0.6606 | 0.1312 | 0.0946 | 0.9762 | 0 |
-| 2024-6 | 2024 | 6 | Miami Grand Prix | 913 | 43 | 0.5110 | 0.4667 | 0.0393 | 0.0335 | 0.8837 | 0 |
-| 2024-7 | 2024 | 7 | Emilia Romagna Grand Prix | 1136 | 40 | 1.2419 | 0.6947 | 0.0863 | 0.0474 | 1.0000 | 0 |
-| 2024-8 | 2024 | 8 | Monaco Grand Prix | 1178 | 21 | 2.3051 | 3.3815 | 0.0509 | 0.0773 | 0.3333 | 0 |
-| 2024-9 | 2024 | 9 | Canadian Grand Prix | 290 | 18 | 3.2058 | 3.6153 | 0.2871 | 0.3299 | 0.0000 | 0 |
+| race_id | year | round | circuit | clean_laps | quality_status | laps | stints | baseline_relative_mae_seconds | model_relative_mae_seconds | cross_circuit_fallback_stints |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 2022-1 | 2022 | 1 | Bahrain Grand Prix | 893 | eligible | 748 | 55 | 1.0747 | 0.6965 | 55 |
+| 2022-10 | 2022 | 10 | British Grand Prix | 676 | eligible | 656 | 41 | 1.5670 | 1.7928 | 41 |
+| 2022-11 | 2022 | 11 | Austrian Grand Prix | 843 | eligible | 839 | 42 | 0.9663 | 0.5507 | 42 |
+| 2022-12 | 2022 | 12 | French Grand Prix | 833 | eligible | 800 | 39 | 0.6790 | 0.5451 | 39 |
+| 2022-13 | 2022 | 13 | Hungarian Grand Prix | 1203 | eligible | 1200 | 59 | 0.9649 | 0.6838 | 59 |
+| 2022-14 | 2022 | 14 | Belgian Grand Prix | 645 | eligible | 602 | 46 | 1.1018 | 0.8186 | 46 |
+| 2022-15 | 2022 | 15 | Dutch Grand Prix | 1139 | eligible | 1072 | 68 | 0.6234 | 0.4189 | 68 |
+| 2022-16 | 2022 | 16 | Italian Grand Prix | 778 | eligible | 770 | 38 | 0.6729 | 0.5705 | 38 |
+| 2022-17 | 2022 | 17 | Singapore Grand Prix | 277 | low_data | 263 | 14 | 3.6240 | 4.1824 | 14 |
+| 2022-19 | 2022 | 19 | United States Grand Prix | 778 | eligible | 733 | 45 | 0.6559 | 0.6288 | 45 |
+| 2022-2 | 2022 | 2 | Saudi Arabian Grand Prix | 651 | eligible | 639 | 34 | 0.8360 | 1.1851 | 34 |
+| 2022-20 | 2022 | 20 | Mexico City Grand Prix | 1284 | eligible | 1283 | 42 | 0.8350 | 0.7361 | 42 |
+| 2022-21 | 2022 | 21 | São Paulo Grand Prix | 941 | eligible | 930 | 57 | 0.7557 | 0.5511 | 57 |
+| 2022-22 | 2022 | 22 | Abu Dhabi Grand Prix | 1032 | eligible | 1026 | 50 | 0.9222 | 0.5457 | 50 |
+| 2022-3 | 2022 | 3 | Australian Grand Prix | 813 | eligible | 802 | 36 | 1.0552 | 1.4875 | 36 |
+| 2022-4 | 2022 | 4 | Emilia Romagna Grand Prix | 773 | eligible | 771 | 23 | 2.3760 | 3.4339 | 23 |
+| 2022-5 | 2022 | 5 | Miami Grand Prix | 878 | eligible | 865 | 41 | 0.5527 | 0.8243 | 41 |
+| 2022-6 | 2022 | 6 | Spanish Grand Prix | 1104 | eligible | 1093 | 69 | 1.1789 | 0.7317 | 69 |
+| 2022-7 | 2022 | 7 | Monaco Grand Prix | 540 | eligible | 520 | 18 | 5.4956 | 6.2859 | 18 |
+| 2022-8 | 2022 | 8 | Azerbaijan Grand Prix | 764 | eligible | 686 | 35 | 0.7012 | 0.7434 | 35 |
+| 2022-9 | 2022 | 9 | Canadian Grand Prix | 1029 | eligible | 985 | 43 | 0.7777 | 0.7026 | 43 |
+| 2023-1 | 2023 | 1 | Bahrain Grand Prix | 914 | eligible | 877 | 61 | 0.8202 | 0.4501 | 61 |
+| 2023-10 | 2023 | 10 | British Grand Prix | 802 | eligible | 774 | 38 | 0.5310 | 0.5016 | 38 |
+| 2023-11 | 2023 | 11 | Hungarian Grand Prix | 1158 | eligible | 1131 | 50 | 0.8579 | 0.5908 | 50 |
+| 2023-12 | 2023 | 12 | Belgian Grand Prix | 721 | eligible | 675 | 45 | 1.4922 | 1.0969 | 45 |
+| 2023-13 | 2023 | 13 | Dutch Grand Prix | 805 | eligible | 786 | 39 | 3.1527 | 3.7353 | 39 |
+| 2023-14 | 2023 | 14 | Italian Grand Prix | 878 | eligible | 878 | 44 | 0.8503 | 0.4680 | 44 |
+| 2023-15 | 2023 | 15 | Singapore Grand Prix | 958 | eligible | 958 | 42 | 0.9805 | 1.2850 | 42 |
+| 2023-16 | 2023 | 16 | Japanese Grand Prix | 702 | eligible | 660 | 42 | 0.9506 | 0.5995 | 42 |
+| 2023-17 | 2023 | 17 | Qatar Grand Prix | 834 | eligible | 784 | 58 | 0.6318 | 0.7296 | 58 |
+| 2023-18 | 2023 | 18 | United States Grand Prix | 919 | eligible | 895 | 51 | 0.7106 | 0.5406 | 51 |
+| 2023-19 | 2023 | 19 | Mexico City Grand Prix | 1134 | eligible | 1088 | 41 | 1.5043 | 1.4561 | 41 |
+| 2023-2 | 2023 | 2 | Saudi Arabian Grand Prix | 829 | eligible | 798 | 36 | 0.8358 | 1.2057 | 36 |
+| 2023-20 | 2023 | 20 | São Paulo Grand Prix | 986 | eligible | 981 | 49 | 1.0309 | 0.9486 | 49 |
+| 2023-21 | 2023 | 21 | Las Vegas Grand Prix | 738 | eligible | 710 | 40 | 0.9355 | 1.2268 | 40 |
+| 2023-22 | 2023 | 22 | Abu Dhabi Grand Prix | 1063 | eligible | 1055 | 54 | 0.6619 | 0.3755 | 54 |
+| 2023-3 | 2023 | 3 | Australian Grand Prix | 769 | eligible | 706 | 19 | 1.3824 | 2.3775 | 19 |
+| 2023-4 | 2023 | 4 | Azerbaijan Grand Prix | 846 | eligible | 799 | 31 | 0.5323 | 0.9470 | 31 |
+| 2023-5 | 2023 | 5 | Miami Grand Prix | 1078 | eligible | 1073 | 37 | 0.7346 | 0.6337 | 37 |
+| 2023-6 | 2023 | 6 | Monaco Grand Prix | 1007 | eligible | 999 | 27 | 1.7370 | 1.9594 | 27 |
+| 2023-7 | 2023 | 7 | Spanish Grand Prix | 1207 | eligible | 1184 | 58 | 0.7803 | 0.5796 | 58 |
+| 2023-8 | 2023 | 8 | Canadian Grand Prix | 1092 | eligible | 1066 | 46 | 0.6029 | 0.6526 | 46 |
+| 2023-9 | 2023 | 9 | Austrian Grand Prix | 1186 | eligible | 1168 | 56 | 0.8283 | 0.4425 | 56 |
+| 2024-1 | 2024 | 1 | Bahrain Grand Prix | 1024 | eligible | 1010 | 60 | 0.8499 | 0.5058 | 60 |
+| 2024-10 | 2024 | 10 | Spanish Grand Prix | 1206 | eligible | 1192 | 60 | 0.9781 | 0.5799 | 60 |
+| 2024-11 | 2024 | 11 | Austrian Grand Prix | 1269 | eligible | 1263 | 61 | 0.9490 | 0.4722 | 61 |
+| 2024-12 | 2024 | 12 | British Grand Prix | 662 | eligible | 651 | 37 | 1.4419 | 1.2008 | 37 |
+| 2024-13 | 2024 | 13 | Hungarian Grand Prix | 1254 | eligible | 1209 | 49 | 1.0449 | 0.7038 | 49 |
+| 2024-14 | 2024 | 14 | Belgian Grand Prix | 751 | eligible | 712 | 46 | 0.5834 | 0.4412 | 46 |
+| 2024-15 | 2024 | 15 | Dutch Grand Prix | 1354 | eligible | 1354 | 46 | 0.9704 | 0.4934 | 46 |
+| 2024-16 | 2024 | 16 | Italian Grand Prix | 927 | eligible | 918 | 47 | 0.6127 | 0.5154 | 47 |
+| 2024-17 | 2024 | 17 | Azerbaijan Grand Prix | 881 | eligible | 881 | 36 | 0.6398 | 0.8105 | 36 |
+| 2024-18 | 2024 | 18 | Singapore Grand Prix | 1109 | eligible | 1099 | 40 | 0.8847 | 0.6996 | 40 |
+| 2024-19 | 2024 | 19 | United States Grand Prix | 937 | eligible | 933 | 40 | 0.6336 | 0.7538 | 40 |
+| 2024-2 | 2024 | 2 | Saudi Arabian Grand Prix | 816 | eligible | 735 | 22 | 0.5514 | 1.0730 | 22 |
+| 2024-20 | 2024 | 20 | Mexico City Grand Prix | 1061 | eligible | 1048 | 35 | 0.7621 | 0.5845 | 35 |
+| 2024-22 | 2024 | 22 | Las Vegas Grand Prix | 826 | eligible | 790 | 50 | 0.6985 | 0.6967 | 50 |
+| 2024-23 | 2024 | 23 | Qatar Grand Prix | 717 | eligible | 702 | 34 | 0.9886 | 1.5713 | 34 |
+| 2024-24 | 2024 | 24 | Abu Dhabi Grand Prix | 921 | eligible | 908 | 39 | 0.8042 | 0.3828 | 39 |
+| 2024-3 | 2024 | 3 | Australian Grand Prix | 857 | eligible | 776 | 40 | 0.5773 | 0.4518 | 40 |
+| 2024-4 | 2024 | 4 | Japanese Grand Prix | 790 | eligible | 764 | 46 | 1.4538 | 1.1741 | 46 |
+| 2024-5 | 2024 | 5 | Chinese Grand Prix | 762 | eligible | 669 | 42 | 0.9607 | 0.5746 | 42 |
+| 2024-6 | 2024 | 6 | Miami Grand Prix | 934 | eligible | 913 | 43 | 0.5110 | 0.5771 | 43 |
+| 2024-7 | 2024 | 7 | Emilia Romagna Grand Prix | 1164 | eligible | 1136 | 40 | 1.2419 | 0.5443 | 40 |
+| 2024-8 | 2024 | 8 | Monaco Grand Prix | 1187 | eligible | 1178 | 21 | 2.3051 | 3.7295 | 21 |
+| 2024-9 | 2024 | 9 | Canadian Grand Prix | 318 | low_data | 290 | 18 | 3.2058 | 3.7747 | 18 |
 
-## Before and after
+## Limitations
 
-The v1 absolute-time errors cannot be compared directly to v2/v3 relative-time
-errors. The v1 absolute MAEs were naive 2.2831 s, pooled linear 9.3359 s,
-MixedLM 9.3344 s, and gradient boosting 2.9892 s. V2's relative-target result
-was worse than its zero baseline and its slopes are invalid as explained above.
+The model modestly beats the zero-degradation baseline in the eligible
+held-out summaries above, but this is not causal validation. Race fixed
+effects remove shared lap evolution, while race exclusions and rank deficiency
+limit coverage. Fuel correction is approximate; the fixed-effects estimator
+is invariant to this particular linear fuel term because race-lap effects
+absorb it. Weekend-relative SOFT/MEDIUM/HARD labels do not identify the
+underlying Pirelli C1-C5 rubber, and pooled estimates may not distinguish
+compounds. Circuit intervals can be wide, especially with few qualifying
+races. Drivers often pit before tyre fall-off, creating survivorship bias.
+Do not treat estimates or `cliff_lap` outputs as detected physical cliffs or
+pit-strategy advice.
 
-| version | LO-race relative MAE | 2024 relative MAE | slope status |
-| --- | --- | --- | --- |
-| v1 absolute-time models | not measured; absolute MAE is incomparable | not measured | 25/60 negative; old exploratory estimates |
-| v2 flawed race FE | 1.1356 s (worse than 1.0986 s zero baseline) | 0.9980 s (worse than 0.8867 s zero baseline) | invalid; 66/66 designs rank deficient |
-| v3 stint slope | 1.0784 s vs zero 1.1153 s | 0.8704 s vs zero 0.9818 s | 19.3% negative, 80.5% in (0, 0.5) |
-
-## Limitations and conclusion
-
-This model is **not validated** unless it both recovers synthetic truth and
-beats the zero-degradation baseline with intervals excluding zero. Synthetic
-recovery results are shown above; the real-data MAE comparison determines
-whether it beats the baseline. Some compound intervals may include zero, and
-the compounds are only the weekend-relative SOFT/MEDIUM/HARD labels, not the
-underlying Pirelli C1-C5 rubber.
-
-Fuel effects and the 110 kg starting load are approximate, not measured.
-Stint-level slopes can still absorb track evolution, traffic, weather, setup,
-and tyre management. The minimum eight-lap rule excludes shorter stints and is
-counted above. Drivers often pit before tyres fall off, creating survivorship
-bias. Circuit pools with fewer than three race clusters fall back to the
-cross-circuit estimate. Do not treat these exploratory estimates as causal
-wear rates or pit-strategy advice.
-
-No schema changes were made. The v3 artifact is
-`models/tyre_degradation_v3.joblib`.
+The v4 artifact is `models\tyre_degradation_v4.joblib`. The earlier
+stint-slope analysis remains documented in [results_v3.md](results_v3.md).

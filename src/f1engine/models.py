@@ -64,7 +64,7 @@ _TRAINING_DATA_SQL = text(
 MODEL_MIN_LAPS = 100
 MODEL_MIN_DRIVERS = 5
 DEFAULT_DEGRADATION_MODEL_PATH = (
-    PROJECT_ROOT / "models" / "tyre_degradation_v3.joblib"
+    PROJECT_ROOT / "models" / "tyre_degradation_v4.joblib"
 )
 LEGACY_DEGRADATION_MODEL_PATH = (
     PROJECT_ROOT
@@ -881,18 +881,39 @@ def save_degradation_model(
     path: str | Path = DEFAULT_DEGRADATION_MODEL_PATH,
     max_iterations: int = 500,
 ) -> Path:
-    """Fit primary per-stint slopes and save their race-bootstrap artifact."""
-    from f1engine.tyre_model_v3 import (
+    """Fit headline race fixed effects and save the v4 inference artifact."""
+    from f1engine.tyre_model_v4 import (
         DEFAULT_FUEL_EFFECT_S_PER_KG,
+        _quality_status,
         build_artifact,
-        fit_stint_slopes,
         load_laps,
         prepare_laps,
     )
+    from f1engine.tyre_model_v3 import fit_race_fixed_effects
 
     raw_laps = load_laps() if training_data is None else training_data
     clean_laps, _ = prepare_laps(raw_laps)
-    slopes, _ = fit_stint_slopes(clean_laps, DEFAULT_FUEL_EFFECT_S_PER_KG)
+    fixed_slopes, fixed_status = fit_race_fixed_effects(
+        clean_laps, DEFAULT_FUEL_EFFECT_S_PER_KG
+    )
+    if training_data is None:
+        from f1engine.tyre_model_v4 import _race_quality_diagnostics
+
+        quality = _race_quality_diagnostics()
+    else:
+        quality = (
+            clean_laps.groupby(["year", "round", "circuit"], as_index=False)
+            .size()
+            .rename(columns={"size": "raw_laps"})
+        )
+        for column in (
+            "wet_compound_laps",
+            "safety_or_red_flag_laps",
+            "pit_laps",
+            "opening_laps",
+        ):
+            quality[column] = 0
+    status = _quality_status(clean_laps, fixed_status, quality)
     max_age = (
         clean_laps.groupby("compound", observed=True)["tyre_life"]
         .max()
@@ -900,7 +921,8 @@ def save_degradation_model(
         .to_dict()
     )
     artifact = build_artifact(
-        slopes,
+        fixed_slopes,
+        status,
         max_tyre_age_by_compound={str(key): int(value) for key, value in max_age.items()},
     )
     artifact_path = Path(path)
@@ -915,18 +937,11 @@ def predict_degradation(
     tyre_life: int,
     *,
     model_path: str | Path = DEFAULT_DEGRADATION_MODEL_PATH,
-) -> tuple[float, float, float, bool]:
-    """Return expected loss, 95% bounds, and a reliability flag.
+) -> dict[str, float | bool | str | None]:
+    """Return a slope and explicit confidence, scope, and warning fields."""
+    from f1engine.tyre_model_v4 import predict_degradation as predict_v4
 
-    Circuit-specific pooling is used only when at least three races support it;
-    otherwise this API warns and falls back to the cross-circuit pool. Negative
-    estimates are not clamped. Reliability is false if the interval includes
-    zero or if a fallback is used. Survivorship bias applies because drivers
-    often pit before tyres fall off.
-    """
-    from f1engine.tyre_model_v3 import predict_relative_degradation
-
-    return predict_relative_degradation(
+    return predict_v4(
         circuit,
         compound,
         tyre_life,
@@ -947,9 +962,9 @@ def cliff_lap(
     observed old tyres. This linear planning estimate is not a physical
     change-point detector.
     """
-    from f1engine.tyre_model_v3 import cliff_planning_lap
+    from f1engine.tyre_model_v4 import cliff_lap as cliff_lap_v4
 
-    return cliff_planning_lap(
+    return cliff_lap_v4(
         circuit,
         compound,
         loss_threshold_seconds=loss_threshold_seconds,
