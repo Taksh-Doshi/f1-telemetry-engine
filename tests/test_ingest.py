@@ -1,4 +1,5 @@
 import logging
+from pathlib import Path
 from unittest.mock import Mock, call
 
 import pandas as pd
@@ -57,6 +58,31 @@ def test_lap_records_preserve_raw_laps_and_convert_values(caplog):
     assert records[2]["compound"] is None
     assert records[0]["team"] == "Red Bull Racing"
     assert "Unknown tyre compound" in caplog.text
+
+
+def _fixture_lap_frame() -> pd.DataFrame:
+    fixture_path = Path(__file__).parent / "fixtures" / "lap_fixture.csv"
+    laps = pd.read_csv(fixture_path)
+    laps["LapTime"] = pd.to_timedelta(laps["LapTimeSeconds"], unit="s")
+    laps["PitInTime"] = pd.to_timedelta(laps["PitInSeconds"], unit="s")
+    laps["PitOutTime"] = pd.to_timedelta(laps["PitOutSeconds"], unit="s")
+    laps["TyreLife"] = laps["TyreLife"].astype(float)
+    return laps
+
+
+def test_tiny_fixture_exercises_fastf1_lap_transformations():
+    records = _build_lap_records(
+        _fixture_lap_frame(),
+        session_id=41,
+        driver_ids={"VER": 1, "LEC": 2, "SAI": 3, "RUS": 4},
+    )
+
+    assert len(records) == 20
+    assert records[0]["lap_time_seconds"] == 92.0
+    assert records[1]["compound"] == "SOFT"
+    assert records[4]["lap_time_seconds"] is None
+    assert records[7]["pit_in_time_seconds"] == 93.5
+    assert records[13]["compound"] == "WET"
 
 
 def test_stint_records_use_first_and_last_lap():
