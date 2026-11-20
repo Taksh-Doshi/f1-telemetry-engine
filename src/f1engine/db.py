@@ -5,6 +5,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from sqlalchemy import Engine, create_engine
+from sqlalchemy.engine import URL
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -16,9 +17,29 @@ def get_engine() -> Engine:
     load_dotenv(PROJECT_ROOT / ".env")
     database_url = os.getenv("DATABASE_URL")
     if not database_url:
-        raise RuntimeError(
-            f"DATABASE_URL is not set. Add it to {PROJECT_ROOT / '.env'} "
-            "or the process environment."
+        host = os.getenv("POSTGRES_HOST")
+        if not host:
+            raise RuntimeError(
+                f"DATABASE_URL is not set. Add it to {PROJECT_ROOT / '.env'} "
+                "or the process environment."
+            )
+        missing = [
+            key
+            for key in ("POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD")
+            if not os.getenv(key)
+        ]
+        if missing:
+            raise RuntimeError(
+                "Postgres connection is incomplete; missing environment "
+                "variable(s): " + ", ".join(missing)
+            )
+        database_url = URL.create(
+            "postgresql+psycopg",
+            username=os.environ["POSTGRES_USER"],
+            password=os.environ["POSTGRES_PASSWORD"],
+            host=host,
+            port=int(os.getenv("POSTGRES_PORT", "5432")),
+            database=os.environ["POSTGRES_DB"],
         )
 
     return create_engine(

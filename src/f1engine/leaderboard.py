@@ -5,7 +5,6 @@ import itertools
 import logging
 import math
 import time
-from typing import Any
 
 from sqlalchemy import text
 

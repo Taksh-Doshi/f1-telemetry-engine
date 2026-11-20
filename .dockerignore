@@ -1,0 +1,13 @@
+.venv*
+**/.venv*
+data/
+**/data/
+cache/
+**/cache/
+*.joblib
+models/**/*.joblib
+.git
+.git/**
+.env
+*.ipynb
+**/.ipynb_checkpoints/
