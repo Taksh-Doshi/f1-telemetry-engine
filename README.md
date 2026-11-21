@@ -186,13 +186,14 @@ python -m f1engine.export_parquet --session-id SESSION_ID
 
 Parquet files are written under `data/parquet/`, which is ignored by Git. The read helpers support one session or all exported sessions.
 
-The hosted PostgreSQL exporter is restricted to the core allowlist of events, sessions, drivers, laps, stints, weather, and lap telemetry summaries. It estimates source size and refuses to exceed its default 400 MB limit. No hosted database is provisioned by this project; set `HOSTED_DATABASE_URL` only when a specific destination has been chosen and is ready:
+The hosted PostgreSQL exporter is restricted to an allowlist: events, sessions, drivers, laps, stints, weather, and lap telemetry summaries. It estimates the source size and refuses to exceed its default 400 MB limit. Set `HOSTED_DATABASE_URL` in your local `.env` to your own destination, then run:
 
 ```powershell
 python -m f1engine.export_hosted --max-mb 400
 ```
 
-Raw `telemetry_samples` are not included in the hosted export. The current local estimate for the allowlisted tables is approximately 35.41 MB.
+Raw `telemetry_samples` are not included in the hosted export. The project's own hosted copy lives on Supabase Postgres: 7 tables, 164,369 rows, about 36 MB, with lap-level summaries only. The connection string is kept in the local `.env` and is not part of the repository.
+
 
 ## Project structure
 
