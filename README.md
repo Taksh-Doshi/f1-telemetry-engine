@@ -100,10 +100,8 @@ The measured median speed-up was 3.15x; 10 rows were returned from a table conta
 
 The saved EXPLAIN plans also show lower execution times after adding the clean-lap analysis index: `01_stint_lengths.sql` changed from 48.173 ms to 33.219 ms, and `10_degradation_slope_per_stint.sql` changed from 46.555 ms to 33.666 ms. The latter plan uses `idx_laps_clean_analysis` for an index-only scan where the previous plan used nested loops with session-scoped lap index scans. See the [before](docs/explain/before_01_stint_lengths.txt) and [after](docs/explain/after_01_stint_lengths.txt) stint-length plans and the [before](docs/explain/before_10_degradation_slope_per_stint.txt) and [after](docs/explain/after_10_degradation_slope_per_stint.txt) degradation plans.
 
-<!-- TODO: Add docs/img/betterdb.png after capturing the BetterDB Monitor dashboard. -->
 ![BetterDB Monitor dashboard placeholder](docs/img/betterdb.png)
 
-<!-- TODO: Add EXPLAIN screenshots at the paths below; docs/explain currently contains text plans only. -->
 ![EXPLAIN before-index screenshot placeholder](docs/img/explain-before.png)
 ![EXPLAIN after-index screenshot placeholder](docs/img/explain-after.png)
 
