@@ -6,12 +6,12 @@ on:
 
 jobs:
   unit:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11.9"
+          python-version: "3.11"
           cache: pip
           cache-dependency-path: requirements.txt
       - run: python -m pip install -e .
@@ -19,7 +19,7 @@ jobs:
       - run: pytest
 
   integration:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     services:
       postgres:
         image: postgres:17-alpine
@@ -40,7 +40,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11.9"
+          python-version: "3.11"
           cache: pip
           cache-dependency-path: requirements.txt
       - run: python -m pip install -e .
